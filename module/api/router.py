@@ -1,0 +1,88 @@
+"""显式方法注册表；所有阻塞业务操作在工作线程执行。"""
+import os
+from dataclasses import dataclass
+from typing import Callable
+
+from module.api import protocol as p
+from module.runtime.process_manager import ProcessManager
+
+
+@dataclass(frozen=True)
+class Method:
+    params: type[p.Params]
+    handler: Callable
+    mutates: bool = False
+
+
+class Router:
+    def __init__(self, configs, runtime):
+        self.configs, self.runtime = configs, runtime
+        self.methods = {
+            'system.ping': Method(p.Params, lambda _: {'pong': True}),
+            'schema.get': Method(p.Params, lambda _: configs.schema()),
+            'instances.list': Method(p.Params, lambda _: runtime.instances()),
+            'instances.create': Method(p.CreateParams, lambda x: configs.create(x.name, x.source), True),
+            'instances.delete': Method(p.RevisionParams, self.delete, True),
+            'config.get': Method(p.InstanceParams, lambda x: configs.get(x.instance)),
+            'config.patch': Method(p.PatchParams, lambda x: configs.patch(x.instance, x.revision, x.changes), True),
+            'overview.get': Method(p.InstanceParams, lambda x: runtime.overview(x.instance)),
+            'scheduler.start': Method(p.InstanceParams, lambda x: runtime.start(x.instance), True),
+            'scheduler.stop': Method(p.InstanceParams, lambda x: runtime.stop(x.instance), True),
+            'tasks.run': Method(p.TaskParams, lambda x: runtime.start(x.instance, x.task), True),
+            'logs.get': Method(p.LogsParams, lambda x: runtime.logs(x.instance, x.after)),
+            'preview.capture': Method(p.InstanceParams, lambda x: runtime.capture(x.instance)),
+            'statistics.resources': Method(p.StatisticsParams, lambda x: runtime.statistics(x.instance, x.days, x.resource)),
+            'settings.get': Method(p.Params, self.settings),
+            'settings.patch': Method(p.DeployParams, self.save_settings, True),
+            'startup.get': Method(p.InstanceParams, self.get_startup),
+            'startup.set': Method(p.StartupParams, self.set_startup, True),
+        }
+
+    def dispatch(self, method, params):
+        entry = self.methods.get(method)
+        if entry is None:
+            raise p.ApiError('METHOD_NOT_FOUND', '未知 API 方法')
+        validated = entry.params.model_validate(params)
+        if entry.mutates and os.environ.get('DEMO') == '1':
+            raise p.ApiError('READ_ONLY', '演示模式下禁止修改配置或运行任务')
+        return entry.handler(validated)
+
+    def delete(self, params):
+        with ProcessManager._get_lifecycle_lock(params.instance):
+            manager = self.runtime.manager(params.instance)
+            if manager.alive:
+                raise p.ApiError('INSTANCE_RUNNING', '请先停止实例再删除')
+            result = self.configs.delete(params.instance, params.revision)
+            ProcessManager.remove_manager(params.instance)
+            self.runtime.logs_cache.pop(params.instance, None)
+            return result
+
+    def settings(self, _):
+        from module.runtime.deploy_settings import deploy_settings_schema
+        result = deploy_settings_schema(self.configs.translate)
+        # 密码只写不读，前端留空表示保持原密码。
+        for group in result['groups']:
+            for field in group['fields']:
+                if field['key'] == 'Password':
+                    field['value'] = ''
+                    field['type'] = 'password'
+        return result
+
+    def save_settings(self, params):
+        from module.runtime.deploy_settings import save_deploy_settings
+        values = dict(params.values)
+        if values.get('Password') == '':
+            values.pop('Password')
+        with self.configs.lock:
+            return save_deploy_settings({'values': values})
+
+    def get_startup(self, params):
+        from module.runtime.deploy_settings import get_startup_run
+        self.configs.path(params.instance)
+        return get_startup_run(params.instance)
+
+    def set_startup(self, params):
+        from module.runtime.deploy_settings import set_startup_run
+        self.configs.path(params.instance)
+        with self.configs.lock:
+            return set_startup_run(params.instance, params.enabled)

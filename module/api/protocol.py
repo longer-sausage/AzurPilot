@@ -1,0 +1,88 @@
+"""协议信封、错误码及参数类型；禁止隐式调用任意 Python 方法。"""
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
+
+VERSION = 1
+
+
+class ApiError(Exception):
+    """可以安全展示给用户的业务错误。"""
+
+    def __init__(self, code: str, message: str, details: Any = None):
+        super().__init__(message)
+        self.code, self.message, self.details = code, message, details
+
+
+class Params(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+
+
+class Request(Params):
+    v: Literal[1]
+    type: Literal['request']
+    id: StrictStr = Field(min_length=1, max_length=100)
+    method: StrictStr = Field(min_length=1, max_length=80)
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class AuthParams(Params):
+    password: StrictStr = Field(default='', max_length=256)
+
+
+class InstanceParams(Params):
+    instance: StrictStr = Field(min_length=1, max_length=64)
+
+
+class CreateParams(Params):
+    name: StrictStr = Field(min_length=1, max_length=64)
+    source: StrictStr | None = None
+
+
+class TaskParams(InstanceParams):
+    task: StrictStr = Field(min_length=1, max_length=80)
+
+
+class ConfigChange(Params):
+    path: StrictStr = Field(min_length=1, max_length=180)
+    value: Any
+
+
+class PatchParams(InstanceParams):
+    revision: StrictStr = Field(min_length=1, max_length=64)
+    changes: list[ConfigChange] = Field(min_length=1, max_length=200)
+
+
+class RevisionParams(InstanceParams):
+    revision: StrictStr
+
+
+class SubscribeParams(Params):
+    instance: StrictStr | None = None
+    topics: list[Literal['instances', 'overview', 'logs', 'preview']] = Field(max_length=4)
+
+
+class LogsParams(InstanceParams):
+    after: StrictInt = Field(default=0, ge=0)
+
+
+class StatisticsParams(InstanceParams):
+    days: StrictInt = Field(default=7, ge=1, le=90)
+    resource: Literal['Oil', 'Coin', 'Gem', 'Cube', 'Pt', 'ActionPoint'] = 'Oil'
+
+
+class DeployParams(Params):
+    values: dict[str, Any]
+
+
+class StartupParams(InstanceParams):
+    enabled: StrictBool
+
+
+def response(request_id, result):
+    return {'v': VERSION, 'type': 'response', 'id': request_id, 'ok': True, 'result': result}
+
+
+def failure(request_id, error: ApiError):
+    return {'v': VERSION, 'type': 'response', 'id': request_id, 'ok': False,
+            'error': {'code': error.code, 'message': error.message, 'details': error.details}}

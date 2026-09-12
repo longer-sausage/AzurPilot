@@ -1,0 +1,455 @@
+{
+  "version": 1,
+  "methods": {
+    "system.ping": {
+      "mutates": false,
+      "params": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "Params",
+        "type": "object"
+      }
+    },
+    "schema.get": {
+      "mutates": false,
+      "params": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "Params",
+        "type": "object"
+      }
+    },
+    "instances.list": {
+      "mutates": false,
+      "params": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "Params",
+        "type": "object"
+      }
+    },
+    "instances.create": {
+      "mutates": true,
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CreateParams",
+        "type": "object"
+      }
+    },
+    "instances.delete": {
+      "mutates": true,
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "instance": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Instance",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instance",
+          "revision"
+        ],
+        "title": "RevisionParams",
+        "type": "object"
+      }
+    },
+    "config.get": {
+      "mutates": false,
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "instance": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Instance",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instance"
+        ],
+        "title": "InstanceParams",
+        "type": "object"
+      }
+    },
+    "config.patch": {
+      "mutates": true,
+      "params": {
+        "$defs": {
+          "ConfigChange": {
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "maxLength": 180,
+                "minLength": 1,
+                "title": "Path",
+                "type": "string"
+              },
+              "value": {
+                "title": "Value"
+              }
+            },
+            "required": [
+              "path",
+              "value"
+            ],
+            "title": "ConfigChange",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "instance": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Instance",
+            "type": "string"
+          },
+          "revision": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Revision",
+            "type": "string"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/$defs/ConfigChange"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Changes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "instance",
+          "revision",
+          "changes"
+        ],
+        "title": "PatchParams",
+        "type": "object"
+      }
+    },
+    "overview.get": {
+      "mutates": false,
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "instance": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Instance",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instance"
+        ],
+        "title": "InstanceParams",
+        "type": "object"
+      }
+    },
+    "scheduler.start": {
+      "mutates": true,
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "instance": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Instance",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instance"
+        ],
+        "title": "InstanceParams",
+        "type": "object"
+      }
+    },
+    "scheduler.stop": {
+      "mutates": true,
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "instance": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Instance",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instance"
+        ],
+        "title": "InstanceParams",
+        "type": "object"
+      }
+    },
+    "tasks.run": {
+      "mutates": true,
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "instance": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Instance",
+            "type": "string"
+          },
+          "task": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Task",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instance",
+          "task"
+        ],
+        "title": "TaskParams",
+        "type": "object"
+      }
+    },
+    "logs.get": {
+      "mutates": false,
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "instance": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Instance",
+            "type": "string"
+          },
+          "after": {
+            "default": 0,
+            "minimum": 0,
+            "title": "After",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "instance"
+        ],
+        "title": "LogsParams",
+        "type": "object"
+      }
+    },
+    "preview.capture": {
+      "mutates": false,
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "instance": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Instance",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instance"
+        ],
+        "title": "InstanceParams",
+        "type": "object"
+      }
+    },
+    "statistics.resources": {
+      "mutates": false,
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "instance": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Instance",
+            "type": "string"
+          },
+          "days": {
+            "default": 7,
+            "maximum": 90,
+            "minimum": 1,
+            "title": "Days",
+            "type": "integer"
+          },
+          "resource": {
+            "default": "Oil",
+            "enum": [
+              "Oil",
+              "Coin",
+              "Gem",
+              "Cube",
+              "Pt",
+              "ActionPoint"
+            ],
+            "title": "Resource",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instance"
+        ],
+        "title": "StatisticsParams",
+        "type": "object"
+      }
+    },
+    "settings.get": {
+      "mutates": false,
+      "params": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "Params",
+        "type": "object"
+      }
+    },
+    "settings.patch": {
+      "mutates": true,
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "values": {
+            "additionalProperties": true,
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "values"
+        ],
+        "title": "DeployParams",
+        "type": "object"
+      }
+    },
+    "startup.get": {
+      "mutates": false,
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "instance": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Instance",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instance"
+        ],
+        "title": "InstanceParams",
+        "type": "object"
+      }
+    },
+    "startup.set": {
+      "mutates": true,
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "instance": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Instance",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "instance",
+          "enabled"
+        ],
+        "title": "StartupParams",
+        "type": "object"
+      }
+    },
+    "auth.login": {
+      "mutates": false,
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "password": {
+            "default": "",
+            "maxLength": 256,
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "title": "AuthParams",
+        "type": "object"
+      }
+    },
+    "events.subscribe": {
+      "mutates": false,
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "instance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Instance"
+          },
+          "topics": {
+            "items": {
+              "enum": [
+                "instances",
+                "overview",
+                "logs",
+                "preview"
+              ],
+              "type": "string"
+            },
+            "maxItems": 4,
+            "title": "Topics",
+            "type": "array"
+          }
+        },
+        "required": [
+          "topics"
+        ],
+        "title": "SubscribeParams",
+        "type": "object"
+      }
+    }
+  }
+}

@@ -1,0 +1,87 @@
+import { expect, test, type WebSocketRoute } from '@playwright/test'
+
+test('总览、配置保存、未保存提示与刷新持久化', async ({page}) => {
+  const errors: string[] = []
+  page.on('pageerror', error => errors.push(error.message))
+  await page.goto('/')
+  await expect(page.getByRole('heading', {name: '运行总览', exact: true})).toBeVisible()
+  await expect(page.getByText('14,200')).toBeVisible()
+  await page.screenshot({path: 'test-results/overview-desktop.png', fullPage: true, animations: 'disabled'})
+  await page.getByRole('link', {name: '连接设置', exact: true}).click()
+  const serial = page.locator('[id="Alas.Emulator.Serial"]')
+  await serial.fill('127.0.0.1:5557')
+  await page.getByRole('button', {name: '保存 1 项修改'}).click()
+  await expect(page.getByRole('button', {name: '已保存', exact: true})).toBeVisible()
+  await page.reload()
+  await expect(serial).toHaveValue('127.0.0.1:5557')
+  await serial.fill('pending-change')
+  await page.locator('.primary-nav').getByRole('link', {name: '运行日志', exact: true}).click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await page.getByRole('button', {name: '继续编辑'}).click()
+  await expect(serial).toHaveValue('pending-change')
+  await page.getByRole('button', {name: '撤销修改', exact: true}).click()
+  await page.screenshot({path: 'test-results/config-desktop.png', fullPage: true, animations: 'disabled'})
+  await page.locator('.primary-nav').getByRole('link', {name: '资源统计', exact: true}).click()
+  await expect(page.getByRole('heading', {name: '资源统计', exact: true})).toBeVisible()
+  await expect(page.getByText('这段时间还没有资源记录')).toBeVisible()
+  expect(errors).toEqual([])
+})
+
+test('新建实例使用真实 API，移动端无横向溢出', async ({page}) => {
+  await page.goto('/')
+  await expect(page.getByRole('heading', {name: '运行总览', exact: true})).toBeVisible()
+  await page.getByRole('button', {name: '创建实例', exact: true}).click()
+  await page.getByLabel('实例名称').fill(`ui_${Date.now()}`)
+  await page.getByRole('dialog').getByRole('button', {name: '创建实例', exact: true}).click()
+  await expect(page.locator('[id="Alas.Emulator.Serial"]')).toBeVisible()
+  await page.setViewportSize({width: 390, height: 844})
+  await page.getByRole('button', {name: '打开导航'}).click()
+  await page.locator('.primary-nav').getByRole('link', {name: '运行总览'}).click()
+  await expect(page.getByRole('heading', {name: '运行总览', exact: true})).toBeVisible()
+  await expect(page.locator('.app-shell')).not.toHaveClass(/mobile-open/)
+  await page.screenshot({path: 'test-results/overview-mobile.png', fullPage: true, animations: 'disabled'})
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+})
+
+test('断线后自动恢复，保留未保存草稿', async ({page}) => {
+  const sockets: WebSocketRoute[] = []
+  await page.routeWebSocket('**/api/v1/ws', socket => {
+    socket.connectToServer()
+    sockets.push(socket)
+  })
+  await page.goto('/#/i/testpilot/task/Alas')
+  const serial = page.locator('[id="Alas.Emulator.Serial"]')
+  await expect(serial).toBeVisible()
+  await serial.fill('keep-draft')
+  await sockets[0].close({code: 1012, reason: '验证服务重启后的恢复'})
+  await expect(page.locator('.connection-banner')).toBeVisible()
+  await expect(page.locator('.connection-label')).toHaveText('已连接')
+  expect(sockets.length).toBeGreaterThan(1)
+  await expect(serial).toHaveValue('keep-draft')
+  await page.getByRole('button', {name: '切换深色主题'}).click()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+  await page.screenshot({path: 'test-results/config-dark.png', fullPage: true, animations: 'disabled'})
+})
+
+test('自动预览在重连后恢复订阅，离开总览后取消', async ({page}) => {
+  const sockets: WebSocketRoute[] = []
+  const subscriptions: string[][] = []
+  page.on('websocket', socket => socket.on('framesent', frame => {
+    const message = JSON.parse(String(frame.payload))
+    if (message.method === 'events.subscribe') subscriptions.push(message.params.topics)
+  }))
+  await page.routeWebSocket('**/api/v1/ws', socket => {
+    socket.connectToServer()
+    sockets.push(socket)
+  })
+  await page.goto('/#/i/testpilot/overview')
+  await page.getByLabel('自动刷新').check()
+  await expect.poll(() => subscriptions.at(-1)).toContain('preview')
+  await sockets[0].close({code: 1012})
+  await expect(page.locator('.connection-banner')).toBeVisible()
+  await expect(page.locator('.connection-label')).toHaveText('已连接')
+  await expect.poll(() => subscriptions.at(-1)).toContain('preview')
+  expect(sockets.length).toBeGreaterThan(1)
+  await page.locator('.primary-nav').getByRole('link', {name: '运行日志', exact: true}).click()
+  await expect.poll(() => subscriptions.at(-1)).not.toContain('preview')
+})

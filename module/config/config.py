@@ -13,16 +13,16 @@ import sys
 import threading
 from datetime import datetime, timedelta
 
-import pywebio
 
 from module.base.filter import Filter
 from module.config.config_generated import GeneratedConfig
-from module.config.config_manual import ManualConfig, OutputConfig
+from module.config.config_manual import ManualConfig
 from module.config.config_updater import ConfigUpdater, ensure_time, get_server_next_update, nearest_future
 from module.config.deep import deep_get, deep_set
 from module.config.time_source import now as current_time
 from module.config.utils import DEFAULT_TIME, dict_to_kv, filepath_config, get_os_reset_remain, path_to_arg, is_good_gpu
 from module.config.watcher import ConfigWatcher
+from module.config.transaction import config_transaction
 from module.exception import RequestHumanTakeover, ScriptError
 from module.logger import logger
 from module.map.map_grids import SelectedGrids
@@ -372,16 +372,17 @@ class AzurLaneConfig(ConfigUpdater, ManualConfig, GeneratedConfig, ConfigWatcher
     def save(self, mod_name='alas'):
         if not self.modified:
             return False
-
-        for path, value in self.modified.items():
-            deep_set(self.data, keys=path, value=value)
-
-        logger.info(
-            f"[配置] 保存配置 {filepath_config(self.config_name, mod_name)}, {dict_to_kv(self.modified)}"
-        )
-        # 不要使用 self.modified = {}，那会创建新对象。
-        self.modified.clear()
-        self.write_file(self.config_name, data=self.data)
+        # API 和工作进程共用事务锁。重新读取最新文件，仅合并本次修改，
+        # 避免用户编辑其他参数时被旧的运行器快照覆盖。
+        with config_transaction(filepath_config(self.config_name, mod_name)):
+            current = self.read_file(self.config_name)
+            for path, value in self.modified.items():
+                deep_set(current, keys=path, value=value)
+            self.write_file(self.config_name, data=current)
+            self.data = current
+            logger.info(f"[配置] 已保存 {filepath_config(self.config_name, mod_name)}，共 {len(self.modified)} 项修改")
+            # 写入成功后再清理，磁盘错误不会丢失待保存的更改。
+            self.modified.clear()
 
     def update(self):
         self.load()
@@ -856,8 +857,6 @@ class AzurLaneConfig(ConfigUpdater, ManualConfig, GeneratedConfig, ConfigWatcher
         return backup
 
 
-pywebio.output.Output = OutputConfig
-pywebio.pin.Output = OutputConfig
 
 
 class ConfigBackup:

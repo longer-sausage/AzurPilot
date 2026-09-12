@@ -1,0 +1,224 @@
+"""WebSocket API 的认证、配置事务及订阅回归测试。"""
+import asyncio
+import shutil
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
+
+from starlette.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
+
+from module.api.app import create_app
+from module.api.config_service import ConfigService, ROOT
+from module.api.protocol import ApiError, ConfigChange
+from module.api.runtime_service import RuntimeService
+from module.api.socket import Gateway, Session
+
+
+def fixture(directory):
+    """测试只操作临时实例，绝不加载用户的任务进程。"""
+    root = Path(directory)
+    (root / 'config').mkdir()
+    (root / 'module/config/argument').mkdir(parents=True)
+    (root / 'module/config/i18n').mkdir(parents=True)
+    for relative in ['module/config/argument/args.json', 'module/config/argument/menu.json',
+                     'module/config/i18n/zh-CN.json', 'config/template.json']:
+        shutil.copyfile(ROOT / relative, root / relative)
+    shutil.copyfile(ROOT / 'config/template.json', root / 'config/testpilot.json')
+    return root
+
+
+class ConfigApiTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.configs = ConfigService(fixture(self.temp.name))
+
+    def test_read_does_not_write_or_expose_unrelated_json(self):
+        path = self.configs.path('testpilot')
+        before = path.stat().st_mtime_ns
+        (path.parent / 'private.json').write_text('{"token": "hidden"}')
+        self.assertEqual(['testpilot'], self.configs.names())
+        self.configs.get('testpilot')
+        self.assertEqual(before, path.stat().st_mtime_ns)
+
+    def test_rejects_path_traversal_and_reserved_names(self):
+        for name in ['../template', 'a/b', 'a\\b', 'template', 'CON', 'c:foo', 'bad.name', '']:
+            with self.subTest(name=name), self.assertRaises(ApiError):
+                self.configs.path(name, exists=False)
+
+    def test_patch_is_atomic_and_rejects_stale_revision(self):
+        original = self.configs.get('testpilot')
+        changed = self.configs.patch('testpilot', original['revision'], [ConfigChange(path='Alas.Emulator.Serial', value='127.0.0.1:5555')])
+        self.assertEqual('127.0.0.1:5555', changed['values']['Alas']['Emulator']['Serial'])
+        with self.assertRaises(ApiError) as context:
+            self.configs.patch('testpilot', original['revision'], [ConfigChange(path='Alas.Emulator.Serial', value='auto')])
+        self.assertEqual('CONFLICT', context.exception.code)
+
+    def test_invalid_batch_does_not_partially_save(self):
+        original = self.configs.get('testpilot')
+        with self.assertRaises(ApiError):
+            self.configs.patch('testpilot', original['revision'], [
+                ConfigChange(path='Alas.Emulator.Serial', value='valid'),
+                ConfigChange(path='Main.Scheduler.Enable', value='false')])
+        self.assertEqual(original, self.configs.get('testpilot'))
+
+    def test_numeric_range_and_multiselect(self):
+        for groups in self.configs.args.values():
+            for fields in groups.values():
+                for field in fields.values():
+                    if field.get('type') == 'multiselect':
+                        self.assertIsInstance(field['value'], list)
+        with self.assertRaises(ApiError):
+            self.configs.validate('IslandBusiness.IslandBusiness.Batch1Shops', [999])
+        for task, groups in self.configs.args.items():
+            for group, fields in groups.items():
+                for arg, field in fields.items():
+                    if isinstance(field.get('validate'), list) and not field.get('display'):
+                        with self.assertRaises(ApiError):
+                            self.configs.validate(f'{task}.{group}.{arg}', field['validate'][1] + 1)
+                        return
+        self.fail('未找到数值范围参数')
+
+    def test_hidden_and_fixed_fields_are_read_only(self):
+        for path in ['Main.Scheduler.Command', 'Restart.Scheduler.Enable']:
+            with self.subTest(path=path), self.assertRaises(ApiError) as context:
+                self.configs.validate(path, True)
+            self.assertEqual('READ_ONLY', context.exception.code)
+
+    def test_duplicate_creation_and_recoverable_deletion(self):
+        created = self.configs.create('second', 'testpilot')
+        with self.assertRaises(ApiError):
+            self.configs.create('second')
+        self.configs.delete('second', created['revision'])
+        self.assertFalse(self.configs.path('second', exists=False).exists())
+        self.assertEqual(1, len(list((self.configs.directory / 'backup').glob('second-*.json'))))
+
+
+class SocketApiTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.app = create_app(root=fixture(self.temp.name), password='test-secret', manage_runtime=False, mount_mcp=False)
+        self.client = TestClient(self.app)
+        self.counter = 0
+
+    def call(self, ws, method, params=None):
+        self.counter += 1
+        request_id = str(self.counter)
+        ws.send_json({'v': 1, 'type': 'request', 'id': request_id, 'method': method, 'params': params or {}})
+        while True:
+            result = ws.receive_json()
+            if result.get('id') == request_id:
+                return result
+
+    def login(self, ws):
+        self.assertEqual('session', ws.receive_json()['topic'])
+        self.assertTrue(self.call(ws, 'auth.login', {'password': 'test-secret'})['ok'])
+
+    def test_authentication_guards_all_business_methods(self):
+        with self.client.websocket_connect('/api/v1/ws') as ws:
+            self.assertTrue(ws.receive_json()['data']['authRequired'])
+            response = self.call(ws, 'instances.list')
+            self.assertEqual('UNAUTHORIZED', response['error']['code'])
+            self.assertTrue(self.call(ws, 'auth.login', {'password': 'test-secret'})['ok'])
+            self.assertEqual('testpilot', self.call(ws, 'instances.list')['result'][0]['name'])
+
+    def test_untrusted_origin_is_rejected_before_upgrade(self):
+        with self.assertRaises(WebSocketDisconnect):
+            with self.client.websocket_connect('/api/v1/ws', headers={'origin': 'https://evil.example'}):
+                pass
+
+    def test_missing_parameter_returns_correlated_error_and_connection_survives(self):
+        with self.client.websocket_connect('/api/v1/ws') as ws:
+            self.login(ws)
+            error = self.call(ws, 'config.get')
+            self.assertEqual('INVALID_PARAMS', error['error']['code'])
+            self.assertTrue(self.call(ws, 'system.ping')['ok'])
+
+    def test_unknown_method_does_not_dispatch_python_attributes(self):
+        with self.client.websocket_connect('/api/v1/ws') as ws:
+            self.login(ws)
+            self.assertEqual('METHOD_NOT_FOUND', self.call(ws, '__dict__')['error']['code'])
+
+    def test_session_ids_cannot_repeat_mutations(self):
+        with self.client.websocket_connect('/api/v1/ws') as ws:
+            self.login(ws)
+            payload = {'v': 1, 'type': 'request', 'id': 'unique', 'method': 'instances.create', 'params': {'name': 'newpilot'}}
+            ws.send_json(payload)
+            self.assertTrue(ws.receive_json()['ok'])
+            ws.send_json(payload)
+            self.assertEqual('DUPLICATE_REQUEST', ws.receive_json()['error']['code'])
+
+    def test_revision_conflict_over_real_websocket(self):
+        with self.client.websocket_connect('/api/v1/ws') as ws:
+            self.login(ws)
+            config = self.call(ws, 'config.get', {'instance': 'testpilot'})['result']
+            params = {'instance': 'testpilot', 'revision': config['revision'], 'changes': [{'path': 'Alas.Emulator.Serial', 'value': '5555'}]}
+            self.assertTrue(self.call(ws, 'config.patch', params)['ok'])
+            self.assertEqual('CONFLICT', self.call(ws, 'config.patch', params)['error']['code'])
+
+    def test_subscribe_sends_scoped_snapshot(self):
+        with self.client.websocket_connect('/api/v1/ws') as ws:
+            self.login(ws)
+            self.assertTrue(self.call(ws, 'events.subscribe', {'instance': 'testpilot', 'topics': ['overview']})['ok'])
+            event = ws.receive_json()
+            self.assertEqual('overview', event['topic'])
+            self.assertEqual('testpilot', event['data']['instance'])
+            self.assertTrue(self.call(ws, 'events.subscribe', {'topics': []})['ok'])
+
+    def test_demo_mode_rejects_mutation(self):
+        with patch.dict('os.environ', {'DEMO': '1'}), self.client.websocket_connect('/api/v1/ws') as ws:
+            self.login(ws)
+            self.assertEqual('READ_ONLY', self.call(ws, 'instances.create', {'name': 'newpilot'})['error']['code'])
+
+    def test_health_and_missing_frontend(self):
+        self.assertEqual({'status': 'ok', 'protocolVersion': 1}, self.client.get('/healthz').json())
+        self.assertEqual(503, self.client.get('/').status_code)
+
+    def test_slow_client_queue_is_bounded(self):
+        from unittest.mock import AsyncMock
+
+        async def check():
+            ws = SimpleNamespace(close=AsyncMock())
+            session = Session(Gateway(None, ''), ws)
+            for _ in range(32):
+                await session.enqueue({})
+            with self.assertRaises(WebSocketDisconnect):
+                await session.enqueue({})
+            ws.close.assert_awaited_once()
+        asyncio.run(check())
+
+
+class LogCursorTests(unittest.TestCase):
+    def test_start_passes_update_stop_event_to_worker(self):
+        runtime = RuntimeService(SimpleNamespace(path=lambda _: None))
+        manager = SimpleNamespace(alive=False)
+        manager.start = Mock(side_effect=lambda *args, **kwargs: setattr(manager, 'alive', True))
+        stop_event = object()
+        with patch.object(runtime, 'manager', return_value=manager), patch.object(
+            runtime, 'overview', return_value={}
+        ), patch('module.runtime.updater.updater', SimpleNamespace(event=stop_event)):
+            runtime.start('testpilot')
+        manager.start.assert_called_once_with('alas', ev=stop_event)
+
+    def test_log_trim_and_clear_do_not_duplicate_entries(self):
+        configs = SimpleNamespace(path=lambda _: None)
+        runtime = RuntimeService(configs)
+        from rich.text import Text
+        entries = [Text(f'INFO 日志 {i}') for i in range(5)]
+        manager = SimpleNamespace(renderables=entries)
+        with patch('module.api.runtime_service.ProcessManager._processes', {'test': manager}):
+            first = runtime.logs('test')
+            self.assertEqual(5, first['cursor'])
+            manager.renderables = entries[2:] + [Text('ERROR 新日志')]
+            second = runtime.logs('test', first['cursor'])
+            self.assertEqual(1, len(second['entries']))
+            self.assertEqual('ERROR', second['entries'][0]['level'])
+            self.assertEqual([], runtime.logs('test', second['cursor'])['entries'])
+
+
+if __name__ == '__main__':
+    unittest.main()

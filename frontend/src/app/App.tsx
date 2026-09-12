@@ -1,0 +1,109 @@
+import { useEffect, useState, type FormEvent } from 'react'
+import { NavLink, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Anchor, ArrowRight, ChartNoAxesCombined, ChevronDown, CircleHelp, Compass, LayoutDashboard, Menu, Moon, Plus, Search, Settings2, Ship, Sun, Terminal, Wifi, WifiOff, X } from 'lucide-react'
+import { api } from '../api/client'
+import { useApp, useConnection } from './context'
+import { ErrorBox, Loading, Modal, StatusBadge } from '../components/ui'
+
+export function CreateInstance({onClose}: {onClose: () => void}) {
+  const [name, setName] = useState('')
+  const [source, setSource] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const {instances, refresh, notify} = useApp()
+  const navigate = useNavigate()
+  async function submit(event: FormEvent) {
+    event.preventDefault(); setBusy(true); setError('')
+    try {
+      await api.request('instances.create', {name, source: source || null})
+      await refresh(); onClose(); notify('实例已创建，请设置模拟器连接')
+      navigate(`/i/${name}/task/Alas`)
+    } catch (error) { setError((error as Error).message) } finally { setBusy(false) }
+  }
+  return <Modal title="创建配置实例" onClose={onClose}><form onSubmit={submit} className="form-stack">
+    <p className="muted">每个实例独立保存任务计划与模拟器连接。</p>
+    <label>实例名称<input autoFocus required pattern="[A-Za-z][A-Za-z0-9_-]{0,63}" value={name} onChange={event => setName(event.target.value)} placeholder="例如：alas-main" maxLength={64}/></label>
+    <label>初始配置<select value={source} onChange={event => setSource(event.target.value)}><option value="">使用默认配置</option>{instances.map(item => <option key={item.name}>{item.name}</option>)}</select></label>
+    {error && <ErrorBox message={error}/>}
+    <button className="button primary" disabled={busy}>{busy ? '正在创建…' : '创建实例'}<ArrowRight size={16}/></button>
+  </form></Modal>
+}
+
+function Login() {
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  async function submit(event: FormEvent) {
+    event.preventDefault(); setError(''); setBusy(true)
+    try { await api.login(password) } catch (error) { setError((error as Error).message) } finally { setBusy(false) }
+  }
+  return <div className="login-page"><div className="login-art"><Compass size={200} strokeWidth={0.5}/><span>让每一次出航，都井然有序。</span></div>
+    <form onSubmit={submit} className="login-card"><div className="brand-mark"><NavigationMark/></div><div className="eyebrow">AZURPILOT CONTROL CENTER</div><h1>欢迎回到指挥室</h1><p className="muted">输入访问密码，连接你的自动化舰队。</p>
+      <label htmlFor="password">访问密码</label><input id="password" type="password" autoComplete="current-password" autoFocus required value={password} onChange={event => setPassword(event.target.value)}/>
+      {error && <ErrorBox message={error}/>}
+      <button className="button primary" disabled={busy}>{busy ? '正在验证…' : '进入控制台'}<ArrowRight size={16}/></button>
+      <small>自动生成的密码保存在服务端 password.txt 中。</small>
+    </form></div>
+}
+
+export function NavigationMark() {
+  return <svg width="28" height="28" viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M16 3 28 28 16 22 4 28 16 3Z" fill="currentColor"/><path d="m16 12 4 9-4-2-4 2 4-9Z" fill="#101e2c"/></svg>
+}
+
+export function App() {
+  const connection = useConnection()
+  const {instances, schema, t, notify, previewEnabled} = useApp()
+  const {instance} = useParams()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const [creating, setCreating] = useState(false)
+  const [search, setSearch] = useState('')
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const [dark, setDark] = useState(() => localStorage.getItem('azurpilot.theme') === 'dark')
+  const current = instances.find(item => item.name === instance)
+  const base = instance ? `/i/${instance}` : ''
+  const activeSection = location.pathname.includes('/task/') ? '任务配置' : location.pathname.endsWith('/statistics') ? '资源统计' : location.pathname.endsWith('/settings') ? '系统设置' : location.pathname.endsWith('/logs') ? '运行日志' : '运行总览'
+  useEffect(() => {
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+    localStorage.setItem('azurpilot.theme', dark ? 'dark' : 'light')
+  }, [dark])
+  useEffect(() => {
+    if (connection === 'ready' && instances.length && (!instance || !instances.some(item => item.name === instance))) {
+      navigate(`/i/${instances[0].name}/overview`, {replace: true})
+    }
+  }, [connection, instances, instance, navigate])
+  useEffect(() => { setMobileOpen(false) }, [location.pathname])
+  useEffect(() => {
+    if (connection !== 'ready') return
+    void api.request('events.subscribe', {instance: instance ?? null, topics: instance ? previewEnabled ? ['instances', 'overview', 'logs', 'preview'] : ['instances', 'overview', 'logs'] : ['instances']}).catch(error => notify(error.message, true))
+  }, [instance, connection, notify, previewEnabled])
+  if (connection === 'auth') return <Login/>
+  return <div className={`app-shell ${mobileOpen ? 'mobile-open' : ''}`}>
+    <aside className="rail"><div className="brand-mark" title="AzurPilot"><NavigationMark/></div><div className="rail-nav">
+      <NavLink to={`${base}/overview`} aria-label="运行总览"><LayoutDashboard size={21}/></NavLink>
+      <NavLink to={`${base}/statistics`} aria-label="资源统计"><ChartNoAxesCombined size={21}/></NavLink>
+      <NavLink to={`${base}/logs`} aria-label="运行日志"><Terminal size={21}/></NavLink>
+    </div><div className="rail-bottom"><button onClick={() => setDark(!dark)} aria-label={dark ? '切换浅色主题' : '切换深色主题'}>{dark ? <Sun size={21}/> : <Moon size={21}/>}</button>
+      <NavLink to={`${base}/settings`} aria-label="系统设置"><Settings2 size={21}/></NavLink>
+      <a href="https://github.com/longer-sausage/AzurPilot" target="_blank" rel="noreferrer" aria-label="项目帮助"><CircleHelp size={21}/></a><div className="avatar">指</div></div>
+    </aside>
+    <aside className="sidebar"><div className="sidebar-brand"><span>AzurPilot<span className="brand-dot">.</span></span><small>自动化指挥中心</small><button className="mobile-close icon-button" aria-label="关闭导航" onClick={() => setMobileOpen(false)}><X size={18}/></button></div>
+      <div className="instance-switcher"><div className="instance-icon"><Ship size={19}/></div><div><span>当前配置实例</span><select aria-label="切换实例" value={instance ?? ''} onChange={event => navigate(`/i/${event.target.value}/overview`)}>{!instances.length && <option value="">尚未创建</option>}{instances.map(item => <option key={item.name}>{item.name}</option>)}</select></div><ChevronDown size={14}/></div>
+      <div className="sidebar-label">工作空间 <button title="创建实例" aria-label="创建实例" onClick={() => setCreating(true)} disabled={connection !== 'ready'}><Plus size={16}/></button></div>
+      <nav className="primary-nav"><NavLink to={`${base}/overview`}><LayoutDashboard size={17}/>运行总览<span className="nav-pill">总览</span></NavLink><NavLink to={`${base}/logs`}><Terminal size={17}/>运行日志</NavLink><NavLink to={`${base}/statistics`}><ChartNoAxesCombined size={17}/>资源统计</NavLink></nav>
+      <div className="sidebar-label">任务配置 <span>{schema ? Object.values(schema.menu).flatMap(group => group.tasks).length : '—'}</span></div>
+      <div className="nav-search"><Search size={14}/><input aria-label="搜索任务" value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索任务…"/></div>
+      <nav className="task-nav">{schema && Object.entries(schema.menu).map(([key, group]) => {
+        const tasks = group.tasks.filter(task => t(`Task.${task}.name`).toLowerCase().includes(search.toLowerCase()) || task.toLowerCase().includes(search.toLowerCase()))
+        if (!tasks.length) return null
+        return <details key={key} open={search || tasks.some(task => location.pathname.endsWith(`/task/${task}`)) ? true : undefined}><summary><Anchor size={14}/>{t(`Menu.${key}.name`)}<ChevronDown size={13}/></summary><div>{tasks.map(task => <NavLink key={task} to={`${base}/task/${task}`}><span/>{t(`Task.${task}.name`)}</NavLink>)}</div></details>
+      })}</nav>
+      <div className="sidebar-footer"><span className={`connection-dot ${connection === 'ready' ? 'online' : ''}`}/><div>{connection === 'ready' ? '服务连接正常' : '等待服务连接'}<small>持续守候 · 随时启航</small></div></div>
+    </aside>
+    <div className="main-shell"><header className="topbar"><button className="mobile-toggle icon-button" aria-label="打开导航" onClick={() => setMobileOpen(true)}><Menu size={20}/></button><div className="breadcrumb">工作空间 <span>/</span> {instance ?? '欢迎'} <span>/</span> <strong>{activeSection}</strong></div><div className="topbar-right"><span className="connection-label">{connection === 'ready' ? <Wifi size={14}/> : <WifiOff size={14}/>}{connection === 'ready' ? '已连接' : '连接中'}</span><span className="topbar-divider"/><span className="version">控制台 / v1</span></div></header>
+      {connection !== 'ready' && <div className="connection-banner" role="status"><WifiOff size={16}/>正在连接后端，连接恢复后将自动同步状态。操作暂不可用。</div>}
+      <main>{!schema ? <Loading/> : !instances.length ? <div className="welcome"><Compass size={84} strokeWidth={1}/><div className="eyebrow">WELCOME ABOARD</div><h1>从一个新实例开始</h1><p>连接模拟器，安排任务，让 AzurPilot 接管日常。</p><button className="button primary" onClick={() => setCreating(true)}><Plus size={17}/>创建第一个实例</button></div> : current ? <Outlet key={instance}/> : <Loading/>}</main>
+      <footer className="page-footer"><span><Anchor size={12}/> AZURPILOT</span><span>{current && <StatusBadge status={current.status}/>}为每一次出航做好准备</span></footer>
+    </div>{creating && <CreateInstance onClose={() => setCreating(false)}/>}
+  </div>
+}

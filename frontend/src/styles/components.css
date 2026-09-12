@@ -1,0 +1,153 @@
+.button {height: 37px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border-radius: 7px; font-size: 11px; font-weight: 550; padding: 0 15px; white-space: nowrap; border: 1px solid transparent; transition: .15s}
+.button.primary {background: var(--accent); color: white; box-shadow: 0 3px 7px #118b7820}
+.button.primary:hover:not(:disabled) {background: var(--accent-hover); transform: translateY(-1px)}
+[data-theme='dark'] .button.primary {color: #102d29}
+.button.secondary {background: var(--surface); border-color: var(--border); color: #6c7d8b}
+.button.secondary:hover {border-color: #b6c7c5; color: var(--accent)}
+.button.danger {background: #bb5259; color: white}
+.button.danger.subtle {background: #bd555510; color: var(--red); border-color: #bd555525}
+.icon-button {display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; color: var(--muted); border-radius: 5px}
+.icon-button:hover {background: var(--surface-muted); color: var(--accent)}
+.text-button {display: inline-flex; gap: 6px; align-items: center; color: var(--accent); font-size: 10px; padding: 5px}
+.panel {background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden}
+.panel-heading {padding: 19px 21px; display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--border)}
+.panel-heading > div {display: flex; align-items: center; gap: 10px}
+.panel-heading > div > svg {color: #8596a3}
+.status {font-size: 10px; border-radius: 5px; display: inline-flex; gap: 5px; align-items: center; padding: 4px 7px; font-weight: 450; white-space: nowrap}
+.status i, .tiny-dot {width: 5px; height: 5px; border-radius: 50%; display: inline-block; background: currentColor; flex-shrink: 0}
+.status.running {background: var(--accent-soft); color: var(--accent)}
+.status.stopped {background: #e7edf350; color: #899baa}
+.status.error {background: #c95e6212; color: var(--red)}
+.status.updating {background: #d9b25a16; color: #b2954a}
+.tiny-dot.teal {color: #269a81}
+.command-banner {display: flex; align-items: center; gap: 18px; position: relative; padding: 24px; background: linear-gradient(100deg, var(--surface) 60%, var(--accent-soft)); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 22px; overflow: hidden}
+.command-banner::before {content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 3px; background: #79cbb5}
+.command-icon {width: 53px; height: 53px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; flex-shrink: 0}
+.banner-title {display: flex; align-items: center; gap: 12px; font-size: 14px; font-weight: 600}
+.command-banner p {font-size: 10px; color: var(--muted); margin-top: 7px; display: flex; flex-wrap: wrap; gap: 9px}
+.command-banner p strong {font-weight: 500; color: #6a7d89}
+.banner-decoration {position: absolute; right: -8px; top: 0; opacity: .1; color: var(--accent); pointer-events: none}
+.resource-grid {display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 17px; margin-bottom: 23px}
+.resource-card {padding: 19px 20px 15px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow)}
+.resource-heading {display: flex; justify-content: space-between; align-items: center; color: #81919c; font-size: 11px; margin-bottom: 15px}
+.resource-heading > div {border-radius: 8px; width: 32px; height: 32px; display: grid; place-items: center; background: #eaf5fa; color: #6d9cbb}
+.resource-1 .resource-heading > div {background: #faf4e8; color: #c6a45b}
+.resource-2 .resource-heading > div {background: #eef0fb; color: #8b91bc}
+.resource-3 .resource-heading > div {background: #e9f6f3; color: #63a58f}
+[data-theme='dark'] .resource-heading > div {background: #ffffff08}
+.resource-value {font-size: 30px; letter-spacing: -.8px; font-weight: 600; font-variant-numeric: tabular-nums; height: 40px}
+.resource-value small {color: #9daab3; font-size: 10px; font-weight: 400; margin-left: 5px; letter-spacing: 0}
+.resource-foot {display: flex; align-items: center; gap: 6px; color: #a0adb7; font-size: 9px; margin-top: 15px; border-top: 1px solid var(--border); padding-top: 11px}
+.resource-foot > svg {margin-left: auto; color: #b9c5cc}
+.overview-grid {display: grid; grid-template-columns: 1.14fr 1fr; gap: 21px; margin-bottom: 22px; align-items: stretch}
+.count-badge {font-size: 9px; padding: 1px 5px; color: #8d9daa; background: var(--surface-muted); border: 1px solid var(--border); border-radius: 4px}
+.schedule-summary {display: flex; align-items: center; gap: 18px; padding: 15px 21px; font-size: 10px; color: var(--muted); background: var(--surface-muted); border-bottom: 1px solid var(--border)}
+.schedule-summary > div {display: flex; align-items: center; gap: 6px}
+.schedule-summary strong {font-weight: 500; color: var(--text)}
+.schedule-summary > span {margin-left: auto; font-size: 9px}
+.task-table {padding: 0 19px; max-height: 327px; overflow-y: auto}
+.task-row {display: grid; grid-template-columns: 22px minmax(70px, 1fr) 49px 83px 10px; align-items: center; gap: 9px; padding: 13px 0; border-bottom: 1px solid var(--border); font-size: 11px}
+.task-row:last-child {border-bottom: 0}
+.task-row:hover .task-row-name strong {color: var(--accent)}
+.task-order {font-size: 9px; color: #abb7c1; font-variant-numeric: tabular-nums}
+.task-row-name strong {font-size: 11px; font-weight: 550; line-height: 1.6}
+.task-row-name small {display: block; font-size: 8px; color: #a0aeb8; margin-top: 2px; letter-spacing: .2px; overflow: hidden; text-overflow: ellipsis}
+.task-state {font-size: 8px; color: #93a3b0; display: block; background: var(--surface-muted); text-align: center; border-radius: 3px; padding: 3px}
+.task-state.pending {color: var(--accent); background: var(--accent-soft)}
+.task-row time {font-size: 9px; text-align: right; font-variant-numeric: tabular-nums; color: #94a4b1}
+.task-row > svg {color: #b0bdc6}
+.preview-panel {display: flex; flex-direction: column}
+.checkbox-label {display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 10px; cursor: pointer}
+.preview-screen {background: radial-gradient(ellipse at 50% 45%, #243e4c, #162b39 65%); margin: 16px 16px 0; aspect-ratio: 16/9; min-height: 196px; position: relative; border-radius: 7px; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #adc3cc; flex: 1}
+.preview-screen > img {width: 100%; height: 100%; object-fit: contain; position: absolute; inset: 0}
+.preview-screen > strong {margin-top: 10px; font-size: 12px; font-weight: 450; z-index: 1}
+.preview-screen > span {font-size: 9px; color: #718c99; margin-top: 8px; z-index: 1}
+.preview-screen > .preview-resolution {font-size: 7px; letter-spacing: 2px; position: absolute; bottom: 14px; color: #547582}
+.radar {width: 98px; height: 98px; display: grid; place-items: center; color: #729f9d; position: relative; margin-top: -12px}
+.radar > div {position: absolute; width: 98px; height: 98px; border: 1px solid #b5f9e415; border-radius: 50%}
+.radar > div:nth-child(2) {width: 150px; height: 150px; border-color: #b5f9e409}
+.radar::before, .radar::after {content: ''; position: absolute; width: 194px; height: 1px; background: #b5f9e407}
+.radar::after {transform: rotate(90deg)}
+.preview-toolbar {padding: 13px 18px 15px; display: flex; justify-content: space-between; align-items: center; font-size: 9px; color: var(--muted)}
+.preview-toolbar > span {display: flex; gap: 6px; align-items: center}
+.preview-error {padding: 9px 18px 0; color: var(--red); font-size: 10px; line-height: 1.7}
+.live-label {font-size: 8px; letter-spacing: .5px; display: flex; align-items: center; gap: 5px; color: #7c9d91; border: 1px solid #65b89922; border-radius: 4px; padding: 3px 6px}
+.live-label i {width: 4px; height: 4px; border-radius: 50%; background: #6aba9e}
+.log-panel .panel-heading {padding-top: 14px; padding-bottom: 14px}
+.log-content {background: var(--surface-muted); padding: 13px 17px; height: 62vh; min-height: 220px; overflow: auto; font-family: "Cascadia Code", "Consolas", "Microsoft YaHei", monospace; font-size: 10px; color: #82929f}
+.compact .log-content {height: 178px; min-height: 0}
+.log-line {display: grid; grid-template-columns: 26px 46px minmax(0, 1fr); gap: 12px; line-height: 1.9; padding: 3px 0; white-space: pre-wrap; overflow-wrap: anywhere}
+.log-number {color: #b6c0c9; font-size: 9px}
+.log-level {font-size: 8px; color: #51a794}
+.log-line.warning, .log-line.warning .log-level {color: #b0955b}
+.log-line.error, .log-line.critical, .log-line.error .log-level, .log-line.critical .log-level {color: #c16c72}
+.log-filters {display: flex; align-items: center; gap: 12px; padding: 14px 20px; font-size: 11px; color: var(--muted)}
+.log-filters .input-icon {flex: 1}
+.quiet-note {font-size: 9px; color: #9aabb5; margin: 16px 2px 0; display: flex; align-items: center; gap: 7px}
+.quiet-note > span {display: flex; gap: 6px; align-items: center; margin-left: auto}
+.empty {min-height: 160px; height: 100%; padding: 35px 16px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--muted); gap: 12px; text-align: center; line-height: 1.8; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; font-size: 11px}
+.empty > svg {color: #a7b9c1; margin-bottom: 3px}
+.empty strong {font-weight: 500; font-size: 12px; color: #8398a5}
+.loading {min-height: 230px; display: flex; gap: 10px; align-items: center; justify-content: center; color: var(--muted)}
+.error-box {display: flex; gap: 10px; align-items: center; padding: 14px 17px; border: 1px solid #d7767520; background: #d7767510; border-radius: 8px; margin-bottom: 16px; color: var(--red); font-size: 12px; line-height: 1.7}
+.error-box button {margin-left: auto; text-decoration: underline; white-space: nowrap}
+.toast {position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); z-index: 100; max-width: 90vw; padding: 14px 23px; border-radius: 9px; color: white; background: #1c7466; box-shadow: 0 5px 25px #102b4e30; font-size: 12px}
+.toast.error {background: #a45159}
+.modal {background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 14px; padding: 24px; width: 440px; max-width: calc(100vw - 30px); box-shadow: 0 20px 80px #132b4830}
+.modal::backdrop {background: #13233070; backdrop-filter: blur(3px)}
+.modal .panel-heading {padding: 0 0 17px; margin-bottom: 18px}
+.modal > p {line-height: 1.9; margin-bottom: 20px; color: var(--muted)}
+.form-stack {display: flex; flex-direction: column; gap: 19px}
+.form-stack label {display: flex; flex-direction: column; gap: 9px; font-size: 12px}
+.form-stack p {font-size: 12px; line-height: 1.8}
+.toggle {background: #cdd7de; width: 34px; height: 20px; border-radius: 12px; padding: 3px; display: inline-flex; align-items: center; flex-shrink: 0; transition: background .2s}
+.toggle > span {display: block; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px #0002; transition: transform .2s}
+.toggle.on {background: var(--accent)}
+.toggle.on > span {transform: translateX(14px)}
+.input-icon {display: flex; align-items: center; padding: 0 11px; gap: 8px; border: 1px solid var(--border); border-radius: 7px; color: #98a7b2; background: var(--surface)}
+.input-icon > input {border: 0; background: transparent; box-shadow: none; flex: 1; width: 100%; padding-left: 0; font-size: 11px}
+.config-toolbar {display: flex; gap: 16px; align-items: center; margin-bottom: 22px; font-size: 10px; color: var(--muted)}
+.config-toolbar .input-icon {flex: 1; max-width: 440px}
+.config-toolbar > span {display: flex; align-items: center; gap: 7px}
+.config-toolbar > button {margin-left: auto}
+.config-layout {display: grid; grid-template-columns: 145px minmax(0, 1fr); gap: 22px; align-items: start}
+.group-nav {position: sticky; top: 20px; display: flex; flex-direction: column; border-left: 1px solid var(--border); padding-left: 8px; font-size: 11px; max-height: calc(100vh - 60px); overflow-y: auto}
+.group-nav a {padding: 10px; color: var(--muted); border-radius: 5px; line-height: 1.7}
+.group-nav a:hover {color: var(--accent); background: var(--accent-soft)}
+.config-group {margin-bottom: 19px; scroll-margin-top: 15px}
+.group-indicator {width: 4px; height: 15px; border-radius: 3px; background: #74bda8}
+.field-row {padding: 19px 22px; display: flex; align-items: center; justify-content: space-between; gap: 25px; border-bottom: 1px solid var(--border)}
+.field-row:last-child {border-bottom: 0}
+.field-row.modified {box-shadow: inset 3px 0 #42ac91; background: #43ac9104}
+.field-label {flex: 1; min-width: 120px}
+.field-label label {font-size: 12px; font-weight: 550; line-height: 1.7}
+.field-label label > span {margin-left: 6px}
+.field-label p {font-size: 10px; color: var(--muted); line-height: 1.9; white-space: pre-line; overflow-wrap: anywhere; margin-top: 5px}
+.field-label small {display: block; margin-top: 5px; color: #a9b4be; font-size: 8px; overflow-wrap: anywhere}
+.field-control {width: 260px; flex-shrink: 0; text-align: right}
+.field-control > input, .field-control > select, .field-control > textarea {width: 100%; font-size: 11px}
+.field-control textarea {resize: vertical; min-height: 80px; line-height: 1.9}
+.save-bar {position: fixed; bottom: 22px; left: 320px; right: 34px; z-index: 25; padding: 13px 20px; border: 1px solid #6aa89750; border-radius: 10px; display: flex; align-items: center; gap: 14px; background: var(--surface); box-shadow: 0 4px 35px #19383125}
+.save-bar > span {display: flex; align-items: center; gap: 8px; margin-right: auto; font-size: 11px; color: var(--muted)}
+.settings-notice {font-size: 11px; color: var(--muted); line-height: 1.9; margin: 24px 0 16px}
+.panel-note {font-size: 10px; color: var(--muted); padding: 13px 20px; border-top: 1px solid var(--border)}
+.chart-panel .empty {height: 350px}
+.chart-panel select {font-size: 11px; padding: 7px 10px}
+.chart-metrics {padding: 27px 30px 15px; display: flex; gap: 60px}
+.chart-metrics span {display: block; font-size: 11px; color: var(--muted); margin-bottom: 10px}
+.chart-metrics strong {font-size: 27px; font-weight: 550; letter-spacing: -.5px}
+.resource-chart {width: calc(100% - 30px); margin: 15px; overflow: visible}
+.resource-chart text {fill: var(--muted); font-size: 10px; font-family: "Segoe UI", sans-serif}
+.data-table {padding: 18px 25px; border-top: 1px solid var(--border); font-size: 11px}
+.data-table summary {cursor: pointer; color: var(--accent); margin-bottom: 15px}
+.data-table table {width: 100%; border-collapse: collapse}
+.data-table th, .data-table td {padding: 10px; text-align: left; border-bottom: 1px solid var(--border)}
+.data-table p {color: var(--muted); margin: 14px 0}
+.fleet-data {padding: 25px}.fleet-data pre {white-space: pre-wrap; line-height: 2; overflow-wrap: anywhere}
+.multi-options {display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end}
+.multi-options label {display: flex; gap: 5px; align-items: center; font-size: 11px}
+.fleet-grid {display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 20px}
+.fleet-column {padding: 18px 22px; border-bottom: 1px solid var(--border)}
+.fleet-column h3 {font-size: 10px; color: var(--muted); font-weight: 500; margin-bottom: 13px}
+.fleet-column > div {display: flex; justify-content: space-between; padding: 9px 0; font-size: 12px}
+.fleet-column small, .fleet-column p {font-size: 10px; color: var(--muted)}
