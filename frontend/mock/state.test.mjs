@@ -1,0 +1,43 @@
+import { describe, expect, it } from 'vitest'
+import { createMockState } from './state.mjs'
+
+describe('前端模拟服务', () => {
+  it('配置按实例隔离，拒绝过期版本和非原子保存', () => {
+    const {dispatch} = createMockState()
+    const initial = dispatch('config.get', {instance: 'demo-main'})
+    const params = {instance: 'demo-main', revision: initial.revision, changes: [{path: 'Alas.Emulator.Serial', value: 'mock-serial'}]}
+    const saved = dispatch('config.patch', params)
+    expect(saved.values.Alas.Emulator.Serial).toBe('mock-serial')
+    expect(dispatch('config.get', {instance: 'demo-alt'}).values.Alas.Emulator.Serial).toBe('127.0.0.1:5557')
+    expect(() => dispatch('config.patch', params)).toThrow(/其他页面/)
+    expect(() => dispatch('config.patch', {...params, revision: saved.revision, changes: [{path: 'Alas.Emulator.Serial', value: '不应部分保存'}, {path: 'Main.Scheduler.Enable', value: 'false'}]})).toThrow()
+    expect(dispatch('config.get', {instance: 'demo-main'})).toEqual(saved)
+  })
+  it('空场景支持创建、复制和删除，重启后恢复初始数据', () => {
+    const {dispatch} = createMockState({empty: true})
+    expect(dispatch('instances.list')).toEqual([])
+    dispatch('instances.create', {name: 'first'})
+    expect(() => dispatch('instances.create', {name: 'first'})).toThrow(/同名/)
+    dispatch('instances.create', {name: 'second', source: 'first'})
+    dispatch('scheduler.start', {instance: 'second'})
+    const config = dispatch('config.get', {instance: 'second'})
+    expect(() => dispatch('instances.delete', {instance: 'second', revision: config.revision})).toThrow(/停止/)
+    dispatch('scheduler.stop', {instance: 'second'})
+    dispatch('instances.delete', {instance: 'second', revision: config.revision})
+    expect(dispatch('instances.list').map(item => item.name)).toEqual(['first'])
+    expect(createMockState({empty: true}).dispatch('instances.list')).toEqual([])
+  })
+  it('契约参数、只读字段、语言、日志游标和错误预览可验证', () => {
+    const {dispatch, tick} = createMockState()
+    expect(() => dispatch('schema.get', {language: '../deploy'})).toThrow(/契约/)
+    expect(dispatch('schema.get', {language: 'en-US'}).translations.Emulator.Serial.name).toContain('Serial')
+    const config = dispatch('config.get', {instance: 'demo-main'})
+    expect(() => dispatch('config.patch', {...config, values: undefined, changes: []})).toThrow(/契约/)
+    expect(() => dispatch('config.patch', {instance: config.instance, revision: config.revision, changes: [{path: 'Main.Scheduler.Command', value: 'Main'}]})).toThrow(/不可修改/)
+    dispatch('scheduler.start', {instance: 'demo-main'})
+    const before = dispatch('logs.get', {instance: 'demo-main'})
+    tick()
+    expect(dispatch('logs.get', {instance: 'demo-main', after: before.cursor}).entries).toHaveLength(1)
+    expect(() => dispatch('preview.capture', {instance: 'demo-error'})).toThrow(/模拟截图失败/)
+  })
+})

@@ -1,7 +1,7 @@
 // 由 dev_tools.export_api_schema 生成，请勿手动编辑。
 export interface Parameters {
   "system.ping": Record<string, never>
-  "schema.get": Record<string, never>
+  "schema.get": { language?: "zh-CN" | "zh-MIAO" | "en-US" | "ja-JP" | "zh-TW" }
   "instances.list": Record<string, never>
   "instances.create": { name: string; source?: string | null }
   "instances.delete": { instance: string; revision: string }

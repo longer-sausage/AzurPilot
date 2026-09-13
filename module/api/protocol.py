@@ -30,6 +30,10 @@ class AuthParams(Params):
     password: StrictStr = Field(default='', max_length=256)
 
 
+class SchemaParams(Params):
+    language: Literal['zh-CN', 'zh-MIAO', 'en-US', 'ja-JP', 'zh-TW'] = 'zh-CN'
+
+
 class InstanceParams(Params):
     instance: StrictStr = Field(min_length=1, max_length=64)
 

@@ -14,8 +14,21 @@
       "mutates": false,
       "params": {
         "additionalProperties": false,
-        "properties": {},
-        "title": "Params",
+        "properties": {
+          "language": {
+            "default": "zh-CN",
+            "enum": [
+              "zh-CN",
+              "zh-MIAO",
+              "en-US",
+              "ja-JP",
+              "zh-TW"
+            ],
+            "title": "Language",
+            "type": "string"
+          }
+        },
+        "title": "SchemaParams",
         "type": "object"
       }
     },

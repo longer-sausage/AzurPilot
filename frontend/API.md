@@ -50,7 +50,7 @@
 | --- | --- | --- |
 | `auth.login` | password | 当前连接通过认证 |
 | `system.ping` | 无 | pong |
-| `schema.get` | 无 | 任务菜单、参数定义与中文翻译 |
+| `schema.get` | 可选 language | 任务菜单、参数定义与指定语言翻译；默认 zh-CN |
 | `instances.list` | 无 | 实例名称、状态、序列号、服务器 |
 | `instances.create` | name、可选 source | 从模板或已有实例复制配置 |
 | `instances.delete` | instance、revision | 停止状态下将配置移至备份 |
@@ -73,6 +73,8 @@
 
 状态枚举：`running`、`stopped`、`error`、`updating`。枚举表示工作进程状态，不能据此推断游戏中的具体画面。
 
+`schema.get.language` 支持 `zh-CN`、`zh-TW`、`en-US`、`ja-JP`、`zh-MIAO`，只影响本次返回的翻译，不修改运行器或其他浏览器的语言。参数定义保留 `mode: yaml`，供前端选择多行 YAML 编辑器。
+
 ## 配置事务
 
 revision 是磁盘 JSON 内容的 SHA-256。`config.patch` 仅接受 `Task.Group.Argument` 形式的叶子路径，最多 200 项修改。完整校验成功后一次性原子替换；失败不保存任何字段。
@@ -83,7 +85,7 @@ revision 是磁盘 JSON 内容的 SHA-256。`config.patch` 仅接受 `Task.Group
 
 API 和核心运行器共用跨进程事务锁。运行器保存时重新读取文件，仅合并自己修改的字段，避免用旧快照覆盖前端修改。发生冲突时，前端保留草稿、展示错误，由用户重新加载后保存。直接绕开配置服务的外部脚本不受此事务锁约束。
 
-隐藏、固定、存储和只读字段由服务端强制拒绝修改。布尔值必须是真正的 JSON boolean；数值范围来自参数定义；日期格式为 `YYYY-MM-DD HH:mm:ss`；多选值必须来自声明的候选项。
+隐藏、固定和只读字段由服务端强制拒绝修改；`storage` 的唯一例外是通过 `config.patch` 将值清空为 `{}`，用于恢复旧版清除内部任务状态的按钮，其他状态内容仍禁止写入。布尔值必须是真正的 JSON boolean；数值范围来自参数定义；日期格式为 `YYYY-MM-DD HH:mm:ss`；多选值必须来自声明的候选项。
 
 ## 订阅与恢复
 

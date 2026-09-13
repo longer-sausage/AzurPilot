@@ -19,7 +19,7 @@ class Router:
         self.configs, self.runtime = configs, runtime
         self.methods = {
             'system.ping': Method(p.Params, lambda _: {'pong': True}),
-            'schema.get': Method(p.Params, lambda _: configs.schema()),
+            'schema.get': Method(p.SchemaParams, lambda x: configs.schema(x.language)),
             'instances.list': Method(p.Params, lambda _: runtime.instances()),
             'instances.create': Method(p.CreateParams, lambda x: configs.create(x.name, x.source), True),
             'instances.delete': Method(p.RevisionParams, self.delete, True),

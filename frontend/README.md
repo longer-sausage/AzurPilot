@@ -1,6 +1,10 @@
 # AzurPilot React 控制台
 
-前端采用 React、TypeScript、Vite 与 React Router。保留「应用功能栏 → 实例和任务导航 → 工作区」布局，提供浅色/深色主题和移动端折叠菜单。业务通信统一使用 `/api/v1/ws`，不依赖 PyWebIO、Vue 或 Electron。
+前端采用 React、TypeScript、Vite 与 React Router。使用「实例和任务导航 → 工作区」两栏布局，整体以 1.25 倍显示，支持移动端折叠菜单。业务通信统一使用 `/api/v1/ws`，不依赖 PyWebIO、Vue 或 Electron。
+
+点击侧栏顶部的实例选择器可切换实例，菜单底部的 `+` 用于创建实例；支持方向键、Home/End 和 Escape。系统设置位于同一侧栏，主题和语言在其中调整，偏好保存在当前浏览器。语言选择沿用五种现有翻译，切换任务菜单、配置字段和说明，控制台固定文案仍为简体中文。
+
+配置表单只显示名称和说明，内部路径仍可作为搜索关键词。多行输入位于说明下方并占满宽度，高度随输入内容和自动换行增减，空值或单行只占一行；带 `mode: yaml` 的参数使用按需加载的 CodeMirror 编辑器，提供行号、语法颜色、自动缩进和撤销，颜色随主题切换。
 
 ## 启动
 
@@ -34,6 +38,33 @@ npm run dev
 
 浏览器打开 `http://127.0.0.1:5173`。Vite 将 WebSocket 代理到 22267；其他端口可设置 `AZURPILOT_BACKEND=http://127.0.0.1:实际端口`。代理保留 Host，使浏览器来源校验仍然有效。
 
+## 独立前端模拟服务
+
+只需 Node.js 和前端依赖，无需 Python、ADB 或模拟器：
+
+```powershell
+npm ci --prefix frontend
+npm run dev:mock --prefix frontend
+```
+
+打开 `http://127.0.0.1:5173`。此命令同时启动 Vite 和监听 `127.0.0.1:22392` 的 mock server，按 Ctrl+C 一并退出。也可单独运行 `npm run mock --prefix frontend`，另开终端执行 `npm run dev --prefix frontend -- --mode mock`。mock 模式始终代理到模拟服务，不使用 `AZURPILOT_BACKEND`。
+
+若 5173 已被占用，可执行 `npm run dev:mock --prefix frontend -- --port 5175` 更换页面端口。
+
+模拟服务从公开的 `args.json`、`menu.json`、翻译文件和 `template.json` 读取元数据，所有实例、部署设置和日志写入只存在内存，重启即重置；不读取或修改用户配置、不启动游戏进程。它使用真实 WebSocket 信封和生成的参数契约，覆盖实例创建/复制/删除、配置保存与版本冲突、模拟启停、日志订阅、预览、统计和启动偏好。
+
+默认包含 `demo-main`（正常数据）、`demo-alt`（不同连接与空统计）和 `demo-error`（错误状态与截图失败）。预览是 1280×720 的 SVG 测试图；运行中的实例每三秒产生一条日志。此服务用于验证前端交互，真实运行、完整业务校验和安全策略仍以 Python API 测试为准。
+
+可在启动前设置以下环境变量：
+
+| 变量 | 用途 |
+| --- | --- |
+| `AZURPILOT_MOCK_PORT` | 修改模拟服务端口，默认 22392；Vite 自动使用相同端口 |
+| `AZURPILOT_MOCK_PASSWORD` | 设置测试密码，验证登录和重连；默认无需认证 |
+| `AZURPILOT_MOCK_SCENARIO=empty` | 从零实例开始，测试欢迎页和首次创建 |
+
+浏览器刷新保留本次模拟服务的数据。验证两个标签页同时保存时，后保存者会收到 `CONFLICT`，可以测试草稿保留和重新加载流程。
+
 ## 目录职责
 
 | 目录 | 职责 |
@@ -47,10 +78,11 @@ npm run dev
 | `src/pages` | 总览、配置、日志、统计和系统设置 |
 | `src/styles` | 设计变量、布局、组件样式 |
 | `e2e` | 连接真实测试 API 的浏览器回归 |
+| `mock` | 独立的内存模拟服务及状态测试 |
 | `../module/api` | 协议、认证会话、路由和业务适配 |
 | `../module/runtime` | 独立于界面的进程、OCR、更新与认证服务 |
 
-配置表单直接读取已有 `args.json`、`menu.json` 和中文翻译，覆盖全部任务菜单；无需在 React 中重复登记游戏配置。字段支持字符串、数值、范围、开关、日期、多选、选项和任务优先级。隐藏字段不展示，运行器存储及固定字段禁止经 API 修改。
+配置表单直接读取已有 `args.json`、`menu.json` 和中文翻译，覆盖全部任务菜单；无需在 React 中重复登记游戏配置。字段支持字符串、数值、范围、开关、日期、多选、选项和任务优先级。隐藏字段不展示，固定字段禁止经 API 修改。存储空间沿用旧版行为：空字典时隐藏字段、空分组和导航；有状态时展示完整格式化 JSON，可点击清除按钮重置为空字典，不能任意改写状态内容。
 
 ## 验证
 
@@ -62,6 +94,7 @@ npm test --prefix frontend
 cd frontend
 npx playwright install chromium
 npm run test:e2e
+npm run test:e2e:mock
 ```
 
 浏览器测试服务只使用临时配置，并拒绝执行真实游戏任务。截图输出在被忽略的 `frontend/test-results`。模拟器截图和游戏实际执行仍需连接模拟器验收。

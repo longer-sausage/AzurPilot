@@ -5,10 +5,17 @@
   --bg: #f5f7f9; --surface: #fff; --surface-muted: #f8fafb; --text: #263744; --muted: #82909e;
   --border: #e9eef1; --accent: #138b78; --accent-hover: #0b7969; --accent-soft: #eaf7f3;
   --navy: #111f2e; --red: #c15b60; --radius: 12px; --shadow: 0 3px 18px #18343d03;
-  --sidebar: #fff;
+  --sidebar: #fff; --sidebar-width: 221px;
+  /* 使用布局缩放同步放大字体、间距和图标，并修正视口高度。 */
+  --ui-scale: 1.25; --viewport-height: calc(100dvh / var(--ui-scale));
+  zoom: var(--ui-scale);
+  --syntax-key: #126c9a; --syntax-string: #237342; --syntax-value: #96509e;
+  --syntax-comment: #72818a; --syntax-punctuation: #657581;
   font-size: 13px;
 }
 :root[data-theme='dark'] {
+  --syntax-key: #7ec9ee; --syntax-string: #a6d99e; --syntax-value: #dab0f5;
+  --syntax-comment: #91a3b2; --syntax-punctuation: #c2cfd8;
   color-scheme: dark; --bg: #111b26; --surface: #1a2735; --surface-muted: #16222f;
   --text: #d7e2ea; --muted: #8a9cab; --border: #2a3845; --accent: #6bd4ba;
   --accent-hover: #8de7d0; --accent-soft: #233d3c; --sidebar: #182431; --shadow: none;

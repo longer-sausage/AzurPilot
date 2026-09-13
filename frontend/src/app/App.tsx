@@ -1,9 +1,10 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { Anchor, ArrowRight, ChartNoAxesCombined, ChevronDown, CircleHelp, Compass, LayoutDashboard, Menu, Moon, Plus, Search, Settings2, Ship, Sun, Terminal, Wifi, WifiOff, X } from 'lucide-react'
+import { Anchor, ArrowRight, ChartNoAxesCombined, ChevronDown, Compass, LayoutDashboard, Menu, Plus, Search, Settings2, Terminal, Wifi, WifiOff, X } from 'lucide-react'
 import { api } from '../api/client'
 import { useApp, useConnection } from './context'
 import { ErrorBox, Loading, Modal, StatusBadge } from '../components/ui'
+import { InstanceSwitcher } from '../components/InstanceSwitcher'
 
 export function CreateInstance({onClose}: {onClose: () => void}) {
   const [name, setName] = useState('')
@@ -59,14 +60,9 @@ export function App() {
   const [creating, setCreating] = useState(false)
   const [search, setSearch] = useState('')
   const [mobileOpen, setMobileOpen] = useState(false)
-  const [dark, setDark] = useState(() => localStorage.getItem('azurpilot.theme') === 'dark')
   const current = instances.find(item => item.name === instance)
   const base = instance ? `/i/${instance}` : ''
   const activeSection = location.pathname.includes('/task/') ? '任务配置' : location.pathname.endsWith('/statistics') ? '资源统计' : location.pathname.endsWith('/settings') ? '系统设置' : location.pathname.endsWith('/logs') ? '运行日志' : '运行总览'
-  useEffect(() => {
-    document.documentElement.dataset.theme = dark ? 'dark' : 'light'
-    localStorage.setItem('azurpilot.theme', dark ? 'dark' : 'light')
-  }, [dark])
   useEffect(() => {
     if (connection === 'ready' && instances.length && (!instance || !instances.some(item => item.name === instance))) {
       navigate(`/i/${instances[0].name}/overview`, {replace: true})
@@ -79,18 +75,10 @@ export function App() {
   }, [instance, connection, notify, previewEnabled])
   if (connection === 'auth') return <Login/>
   return <div className={`app-shell ${mobileOpen ? 'mobile-open' : ''}`}>
-    <aside className="rail"><div className="brand-mark" title="AzurPilot"><NavigationMark/></div><div className="rail-nav">
-      <NavLink to={`${base}/overview`} aria-label="运行总览"><LayoutDashboard size={21}/></NavLink>
-      <NavLink to={`${base}/statistics`} aria-label="资源统计"><ChartNoAxesCombined size={21}/></NavLink>
-      <NavLink to={`${base}/logs`} aria-label="运行日志"><Terminal size={21}/></NavLink>
-    </div><div className="rail-bottom"><button onClick={() => setDark(!dark)} aria-label={dark ? '切换浅色主题' : '切换深色主题'}>{dark ? <Sun size={21}/> : <Moon size={21}/>}</button>
-      <NavLink to={`${base}/settings`} aria-label="系统设置"><Settings2 size={21}/></NavLink>
-      <a href="https://github.com/longer-sausage/AzurPilot" target="_blank" rel="noreferrer" aria-label="项目帮助"><CircleHelp size={21}/></a><div className="avatar">指</div></div>
-    </aside>
     <aside className="sidebar"><div className="sidebar-brand"><span>AzurPilot<span className="brand-dot">.</span></span><small>自动化指挥中心</small><button className="mobile-close icon-button" aria-label="关闭导航" onClick={() => setMobileOpen(false)}><X size={18}/></button></div>
-      <div className="instance-switcher"><div className="instance-icon"><Ship size={19}/></div><div><span>当前配置实例</span><select aria-label="切换实例" value={instance ?? ''} onChange={event => navigate(`/i/${event.target.value}/overview`)}>{!instances.length && <option value="">尚未创建</option>}{instances.map(item => <option key={item.name}>{item.name}</option>)}</select></div><ChevronDown size={14}/></div>
-      <div className="sidebar-label">工作空间 <button title="创建实例" aria-label="创建实例" onClick={() => setCreating(true)} disabled={connection !== 'ready'}><Plus size={16}/></button></div>
-      <nav className="primary-nav"><NavLink to={`${base}/overview`}><LayoutDashboard size={17}/>运行总览<span className="nav-pill">总览</span></NavLink><NavLink to={`${base}/logs`}><Terminal size={17}/>运行日志</NavLink><NavLink to={`${base}/statistics`}><ChartNoAxesCombined size={17}/>资源统计</NavLink></nav>
+      <InstanceSwitcher onCreate={() => setCreating(true)}/>
+      <div className="sidebar-label">工作空间</div>
+      <nav className="primary-nav"><NavLink to={`${base}/overview`}><LayoutDashboard size={17}/>运行总览<span className="nav-pill">总览</span></NavLink><NavLink to={`${base}/logs`}><Terminal size={17}/>运行日志</NavLink><NavLink to={`${base}/statistics`}><ChartNoAxesCombined size={17}/>资源统计</NavLink><NavLink to={`${base}/settings`}><Settings2 size={17}/>系统设置</NavLink></nav>
       <div className="sidebar-label">任务配置 <span>{schema ? Object.values(schema.menu).flatMap(group => group.tasks).length : '—'}</span></div>
       <div className="nav-search"><Search size={14}/><input aria-label="搜索任务" value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索任务…"/></div>
       <nav className="task-nav">{schema && Object.entries(schema.menu).map(([key, group]) => {

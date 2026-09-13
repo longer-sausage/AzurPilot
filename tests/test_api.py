@@ -24,7 +24,7 @@ def fixture(directory):
     (root / 'module/config/argument').mkdir(parents=True)
     (root / 'module/config/i18n').mkdir(parents=True)
     for relative in ['module/config/argument/args.json', 'module/config/argument/menu.json',
-                     'module/config/i18n/zh-CN.json', 'config/template.json']:
+                     'module/config/i18n/zh-CN.json', 'module/config/i18n/en-US.json', 'config/template.json']:
         shutil.copyfile(ROOT / relative, root / relative)
     shutil.copyfile(ROOT / 'config/template.json', root / 'config/testpilot.json')
     return root
@@ -43,6 +43,14 @@ class ConfigApiTests(unittest.TestCase):
         self.assertEqual(['testpilot'], self.configs.names())
         self.configs.get('testpilot')
         self.assertEqual(before, path.stat().st_mtime_ns)
+
+    def test_schema_language_is_request_local(self):
+        original = self.configs.schema()
+        english = self.configs.schema('en-US')
+        self.assertIn('Serial', english['translations']['Emulator']['Serial']['name'])
+        self.assertEqual(original, self.configs.schema())
+        with self.assertRaises(ApiError):
+            self.configs.schema('../deploy')
 
     def test_rejects_path_traversal_and_reserved_names(self):
         for name in ['../template', 'a/b', 'a\\b', 'template', 'CON', 'c:foo', 'bad.name', '']:
@@ -87,6 +95,23 @@ class ConfigApiTests(unittest.TestCase):
             with self.subTest(path=path), self.assertRaises(ApiError) as context:
                 self.configs.validate(path, True)
             self.assertEqual('READ_ONLY', context.exception.code)
+
+    def test_storage_can_only_be_cleared_with_revision(self):
+        import json
+        path = self.configs.path('testpilot')
+        data = self.configs.get('testpilot')['values']
+        data['Alas']['Storage']['Storage'] = {'retry': {'count': 3, 'enabled': False}}
+        path.write_text(json.dumps(data), encoding='utf-8')
+        original = self.configs.get('testpilot')
+        for value in [{'count': 1}, [], '', None]:
+            with self.subTest(value=value), self.assertRaises(ApiError):
+                self.configs.patch('testpilot', original['revision'], [ConfigChange(path='Alas.Storage.Storage', value=value)])
+        cleared = self.configs.patch('testpilot', original['revision'], [ConfigChange(path='Alas.Storage.Storage', value={})])
+        self.assertEqual({}, cleared['values']['Alas']['Storage']['Storage'])
+        self.assertEqual(original['values']['Alas']['Emulator'], cleared['values']['Alas']['Emulator'])
+        with self.assertRaises(ApiError) as conflict:
+            self.configs.patch('testpilot', original['revision'], [ConfigChange(path='Alas.Storage.Storage', value={})])
+        self.assertEqual('CONFLICT', conflict.exception.code)
 
     def test_duplicate_creation_and_recoverable_deletion(self):
         created = self.configs.create('second', 'testpilot')

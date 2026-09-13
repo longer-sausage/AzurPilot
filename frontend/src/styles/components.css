@@ -93,7 +93,7 @@
 .error-box button {margin-left: auto; text-decoration: underline; white-space: nowrap}
 .toast {position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); z-index: 100; max-width: 90vw; padding: 14px 23px; border-radius: 9px; color: white; background: #1c7466; box-shadow: 0 5px 25px #102b4e30; font-size: 12px}
 .toast.error {background: #a45159}
-.modal {background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 14px; padding: 24px; width: 440px; max-width: calc(100vw - 30px); box-shadow: 0 20px 80px #132b4830}
+.modal {background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 14px; padding: 24px; width: 440px; max-width: calc(100vw / var(--ui-scale) - 30px); box-shadow: 0 20px 80px #132b4830}
 .modal::backdrop {background: #13233070; backdrop-filter: blur(3px)}
 .modal .panel-heading {padding: 0 0 17px; margin-bottom: 18px}
 .modal > p {line-height: 1.9; margin-bottom: 20px; color: var(--muted)}
@@ -111,7 +111,7 @@
 .config-toolbar > span {display: flex; align-items: center; gap: 7px}
 .config-toolbar > button {margin-left: auto}
 .config-layout {display: grid; grid-template-columns: 145px minmax(0, 1fr); gap: 22px; align-items: start}
-.group-nav {position: sticky; top: 20px; display: flex; flex-direction: column; border-left: 1px solid var(--border); padding-left: 8px; font-size: 11px; max-height: calc(100vh - 60px); overflow-y: auto}
+.group-nav {position: sticky; top: 20px; display: flex; flex-direction: column; border-left: 1px solid var(--border); padding-left: 8px; font-size: 11px; max-height: calc(var(--viewport-height) - 60px); overflow-y: auto}
 .group-nav a {padding: 10px; color: var(--muted); border-radius: 5px; line-height: 1.7}
 .group-nav a:hover {color: var(--accent); background: var(--accent-soft)}
 .config-group {margin-bottom: 19px; scroll-margin-top: 15px}
@@ -120,14 +120,13 @@
 .field-row:last-child {border-bottom: 0}
 .field-row.modified {box-shadow: inset 3px 0 #42ac91; background: #43ac9104}
 .field-label {flex: 1; min-width: 120px}
-.field-label label {font-size: 12px; font-weight: 550; line-height: 1.7}
+.field-label label {font-size: 14px; font-weight: 550; line-height: 1.7}
 .field-label label > span {margin-left: 6px}
-.field-label p {font-size: 10px; color: var(--muted); line-height: 1.9; white-space: pre-line; overflow-wrap: anywhere; margin-top: 5px}
-.field-label small {display: block; margin-top: 5px; color: #a9b4be; font-size: 8px; overflow-wrap: anywhere}
+.field-label p {font-size: 12px; color: var(--muted); line-height: 1.9; white-space: pre-line; overflow-wrap: anywhere; margin-top: 5px}
 .field-control {width: 260px; flex-shrink: 0; text-align: right}
-.field-control > input, .field-control > select, .field-control > textarea {width: 100%; font-size: 11px}
-.field-control textarea {resize: vertical; min-height: 80px; line-height: 1.9}
-.save-bar {position: fixed; bottom: 22px; left: 320px; right: 34px; z-index: 25; padding: 13px 20px; border: 1px solid #6aa89750; border-radius: 10px; display: flex; align-items: center; gap: 14px; background: var(--surface); box-shadow: 0 4px 35px #19383125}
+.field-control > input, .field-control > select, .field-control > textarea {width: 100%; font-size: 13px}
+.field-control textarea {resize: none; overflow-y: hidden; min-height: 0; line-height: 1.9}
+.save-bar {position: fixed; bottom: 22px; left: calc(var(--sidebar-width) + 32px); right: 34px; z-index: 25; padding: 13px 20px; border: 1px solid #6aa89750; border-radius: 10px; display: flex; align-items: center; gap: 14px; background: var(--surface); box-shadow: 0 4px 35px #19383125}
 .save-bar > span {display: flex; align-items: center; gap: 8px; margin-right: auto; font-size: 11px; color: var(--muted)}
 .settings-notice {font-size: 11px; color: var(--muted); line-height: 1.9; margin: 24px 0 16px}
 .panel-note {font-size: 10px; color: var(--muted); padding: 13px 20px; border-top: 1px solid var(--border)}
@@ -151,3 +150,23 @@
 .fleet-column h3 {font-size: 10px; color: var(--muted); font-weight: 500; margin-bottom: 13px}
 .fleet-column > div {display: flex; justify-content: space-between; padding: 9px 0; font-size: 12px}
 .fleet-column small, .fleet-column p {font-size: 10px; color: var(--muted)}
+.config-group .panel-heading h2 {font-size: 16px}
+.config-group .small-label, .group-nav {font-size: 12px}
+.config-groups {min-width: 0}
+.field-row-multiline {flex-direction: column; align-items: stretch; gap: 13px}
+.field-row-multiline .field-control {width: 100%; min-width: 0; text-align: left}
+.field-row-multiline textarea {padding: 10px 14px; background: var(--surface-muted); font-family: "Cascadia Code", "Consolas", "Microsoft YaHei", monospace}
+.yaml-editor {border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface-muted); text-align: left}
+.yaml-editor:focus-within {border-color: var(--accent)}
+.editor-heading {padding: 8px 14px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 11px; letter-spacing: 1px}
+.yaml-editor .cm-editor {background: var(--surface-muted); color: var(--text); outline: none; font-size: 13px}
+.yaml-editor .cm-scroller {max-height: 480px; overflow: auto; font-family: "Cascadia Code", "Consolas", "Microsoft YaHei", monospace; line-height: 1.9}
+.yaml-editor .cm-content {padding: 12px 0; caret-color: var(--text)}
+.yaml-editor .cm-line {padding: 0 14px}
+.yaml-editor .cm-gutters {background: var(--surface-muted); color: var(--muted); border-right: 1px solid var(--border)}
+.yaml-editor .cm-activeLine {background: var(--accent-soft)}
+.yaml-editor .cm-cursor {border-left-color: var(--text)}
+.yaml-editor.is-disabled {opacity: .65}
+.storage-field {display: grid; gap: 12px}
+.storage-field pre {margin: 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-muted); font: 13px/1.9 "Cascadia Code", "Consolas", "Microsoft YaHei", monospace; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 480px; overflow-y: auto}
+.storage-field .button {justify-self: start}

@@ -1,9 +1,9 @@
 export type Scalar = string | number | boolean | null
-export type Value = Scalar | Scalar[]
+export type Value = Scalar | Value[] | {[key: string]: Value}
 export type Values = Record<string, Record<string, Record<string, Value>>>
 export type Status = 'running' | 'stopped' | 'error' | 'updating'
 export interface Instance { name: string; status: Status; serial: string; server: string }
-export interface Field { type: string; value: Value; display?: string; option?: Value[]; validate?: string | number[] }
+export interface Field { type: string; value: Value; mode?: string; display?: string; option?: Value[]; validate?: string | number[] }
 export interface Schema {
   menu: Record<string, { menu: string; page: string; tasks: string[] }>
   args: Record<string, Record<string, Record<string, Field>>>

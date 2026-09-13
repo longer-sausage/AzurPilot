@@ -1,22 +1,20 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Plus, Save, Settings2, Trash2 } from 'lucide-react'
+import { Palette, Save, Settings2, Trash2 } from 'lucide-react'
 import { api } from '../api/client'
 import type { Settings as SettingsData, Value } from '../api/types'
-import { useApp, useConnection } from '../app/context'
-import { CreateInstance } from '../app/App'
+import { languages, useApp, useConnection } from '../app/context'
 import { ErrorBox, Loading, Modal, PageTitle } from '../components/ui'
 import { FieldInput } from '../components/FieldInput'
 
 export function Settings() {
   const {instance = ''} = useParams()
-  const {notify, refresh, instances} = useApp()
+  const {notify, refresh, instances, theme, setTheme, language, setLanguage, t} = useApp()
   const [data, setData] = useState<SettingsData>()
   const [draft, setDraft] = useState<Record<string, Value>>({})
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  const [creating, setCreating] = useState(false)
   const [startup, setStartup] = useState(false)
   const connection = useConnection()
   useEffect(() => {
@@ -41,10 +39,13 @@ export function Settings() {
   }
   return <><PageTitle eyebrow="WORKSPACE SETTINGS" title="系统设置" description="管理实例、服务连接与运行环境。" actions={<button className="button primary" onClick={save} disabled={!Object.keys(draft).length || busy || connection !== 'ready'}><Save size={16}/>保存设置</button>}/>
     {error && <ErrorBox message={error}/>}
-    <section className="panel instance-settings"><div className="panel-heading"><div><Settings2 size={18}/><h2>实例管理</h2></div><button className="text-button" onClick={() => setCreating(true)} disabled={connection !== 'ready'}><Plus size={16}/>新建实例</button></div><div className="field-row"><div className="field-label"><label>启动服务时自动运行 {instance}</label><p>服务启动后自动接续此实例的任务调度。</p></div><FieldInput id="startup" value={startup} onChange={setAutoRun} label="启动时自动运行" disabled={busy || connection !== 'ready'}/></div><div className="field-row"><div className="field-label"><label>删除当前实例</label><p>配置将移入备份目录；必须先停止运行中的实例。</p></div><button className="button danger subtle" disabled={busy || connection !== 'ready' || instances.find(item => item.name === instance)?.status === 'running'} onClick={() => setDeleting(true)}><Trash2 size={15}/>删除实例</button></div></section>
-    <p className="settings-notice">以下为服务端部署设置，保存后需要重启服务生效。主题可通过左下角按钮即时切换。</p>
-    {!data ? <Loading/> : data.groups.map(group => <section className="panel config-group" key={group.key}><div className="panel-heading"><h2>{group.label}</h2><span className="small-label">{group.key}</span></div>{group.fields.filter(field => !['CDN', 'DpiScaling', 'Theme'].includes(field.key)).map(field => <div className="field-row" key={field.key}><div className="field-label"><label htmlFor={`deploy-${field.key}`}>{field.label}</label><p>{field.key === 'Password' ? '留空保留原密码。新密码在重启服务后生效。' : field.help.replace(/<[^>]*>/g, '')}</p></div><div className="field-control"><FieldInput id={`deploy-${field.key}`} label={field.label} type={field.type} options={field.options} value={field.key in draft ? draft[field.key] : field.value} disabled={busy || connection !== 'ready'} onChange={value => setDraft(previous => ({...previous, [field.key]: value}))}/></div></div>)}</section>)}
+    <section className="panel config-group"><div className="panel-heading"><div><Palette size={18}/><h2>界面偏好</h2></div></div>
+      <div className="field-row"><div className="field-label"><label htmlFor="ui-theme">界面主题</label><p>即时切换当前浏览器的外观。</p></div><div className="field-control"><select id="ui-theme" value={theme} onChange={event => setTheme(event.target.value as typeof theme)}><option value="light">浅色</option><option value="dark">深色</option></select></div></div>
+      <div className="field-row"><div className="field-label"><label htmlFor="ui-language">界面语言</label><p>切换任务菜单、配置名称及说明的语言，选择会保存在当前浏览器中。</p></div><div className="field-control"><select id="ui-language" value={language} disabled={connection !== 'ready'} onChange={event => setLanguage(event.target.value as typeof language)}>{Object.entries(languages).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></div></div>
+    </section>
+    <section className="panel instance-settings"><div className="panel-heading"><div><Settings2 size={18}/><h2>实例管理</h2></div></div><div className="field-row"><div className="field-label"><label>启动服务时自动运行 {instance}</label><p>服务启动后自动接续此实例的任务调度。</p></div><FieldInput id="startup" value={startup} onChange={setAutoRun} label="启动时自动运行" disabled={busy || connection !== 'ready'}/></div><div className="field-row"><div className="field-label"><label>删除当前实例</label><p>配置将移入备份目录；必须先停止运行中的实例。</p></div><button className="button danger subtle" disabled={busy || connection !== 'ready' || instances.find(item => item.name === instance)?.status === 'running'} onClick={() => setDeleting(true)}><Trash2 size={15}/>删除实例</button></div></section>
+    <p className="settings-notice">以下为服务端部署设置，保存后需要重启服务生效。界面偏好即时生效。</p>
+    {!data ? <Loading/> : data.groups.map(group => <section className="panel config-group" key={group.key}><div className="panel-heading"><h2>{t(`Gui.DeploySetting.Group${group.key}`)}</h2></div>{group.fields.filter(field => !['CDN', 'DpiScaling', 'Theme', 'Language'].includes(field.key)).map(field => <div className={`field-row ${['textarea', 'yaml', 'task_priority'].includes(field.type) ? 'field-row-multiline' : ''}`} key={field.key}><div className="field-label"><label htmlFor={`deploy-${field.key}`}>{field.label}</label><p>{field.key === 'Password' ? '留空保留原密码。新密码在重启服务后生效。' : field.help.replace(/<[^>]*>/g, '')}</p></div><div className="field-control"><FieldInput id={`deploy-${field.key}`} label={field.label} type={field.type} options={field.options} value={field.key in draft ? draft[field.key] : field.value} disabled={busy || connection !== 'ready'} onChange={value => setDraft(previous => ({...previous, [field.key]: value}))}/></div></div>)}</section>)}
     {deleting && <Modal title={`删除实例 ${instance}`} onClose={() => setDeleting(false)}><p>实例将从列表移除，原配置保留在 config/backup 中。</p><button className="button danger" disabled={busy} onClick={remove}>确认删除</button></Modal>}
-    {creating && <CreateInstance onClose={() => setCreating(false)}/>}
   </>
 }

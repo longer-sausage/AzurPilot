@@ -80,8 +80,13 @@ class ConfigService:
                         merged.setdefault(task, {}).setdefault(group, {}).update(fields)
         return merged, hashlib.sha256(raw).hexdigest()
 
-    def schema(self):
-        return {'menu': self.menu, 'args': self.args, 'translations': self.translations}
+    def schema(self, language='zh-CN'):
+        """按会话读取翻译，不修改运行器或其他浏览器的全局语言。"""
+        if language not in {'zh-CN', 'zh-MIAO', 'en-US', 'ja-JP', 'zh-TW'}:
+            raise ApiError('INVALID_PARAMS', '不支持的界面语言')
+        translations = self.translations if language == 'zh-CN' else self.read_json(
+            self.root / 'module/config/i18n' / f'{language}.json')
+        return {'menu': self.menu, 'args': self.args, 'translations': translations}
 
     def get(self, name):
         data, revision = self.read(name)
@@ -106,6 +111,9 @@ class ConfigService:
         field = self.args
         for part in parts:
             field = field.get(part, {})
+        # 旧界面的存储区禁止编辑内容，但允许显式清空；仍使用配置事务与版本校验。
+        if field.get('type') == 'storage' and field.get('display') != 'hide' and type(value) is dict and not value:
+            return parts
         if not field or field.get('display') in ('hide', 'disabled', 'readonly', 'display') or field.get('type') in ('storage', 'stored', 'state', 'lock'):
             raise ApiError('READ_ONLY', f'参数不存在或不允许修改：{path}')
         default, kind = field.get('value'), field.get('type')

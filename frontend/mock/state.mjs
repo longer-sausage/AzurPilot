@@ -1,0 +1,175 @@
+import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import Ajv from 'ajv'
+
+// 只读取公开的模板、元数据和翻译，绝不读取用户实例或部署文件。
+const read = path => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8'))
+const args = read('../../module/config/argument/args.json')
+const menu = read('../../module/config/argument/menu.json')
+const template = read('../../config/template.json')
+const contract = read('../src/api/contract.json')
+const locales = Object.fromEntries(['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'zh-MIAO'].map(lang => [lang, read(`../../module/config/i18n/${lang}.json`)]))
+const ajv = new Ajv({strict: false, useDefaults: true})
+const validators = Object.fromEntries(Object.entries(contract.methods).map(([method, entry]) => [method, ajv.compile(entry.params)]))
+const revision = values => createHash('sha256').update(JSON.stringify(values)).digest('hex')
+const timestamp = date => date.toISOString().slice(0, 19).replace('T', ' ')
+const translate = key => key.split('.').reduce((value, part) => value?.[part], locales['zh-CN']) ?? key
+export const fail = (code, message) => {throw Object.assign(new Error(message), {code})}
+
+function validateField(path, value) {
+  const parts = path.split('.')
+  const field = parts.length === 3 && parts.reduce((node, key) => Object.hasOwn(node ?? {}, key) ? node[key] : undefined, args)
+  if (!field) fail('INVALID_PARAMS', '配置项不存在')
+  if (field.type === 'storage' && field.display !== 'hide' && value !== null && typeof value === 'object' && !Array.isArray(value) && !Object.keys(value).length) return parts
+  if (['hide', 'disabled', 'readonly', 'display'].includes(field.display) || ['storage', 'stored', 'state', 'lock'].includes(field.type)) fail('READ_ONLY', '此配置项不可修改')
+  if (field.type === 'multiselect') {
+    if (!Array.isArray(value) || value.some(item => !field.option?.includes(item)) || new Set(value).size !== value.length) fail('INVALID_PARAMS', '多选项无效')
+    return parts
+  }
+  if (field.option?.length && !field.option.includes(value)) fail('INVALID_PARAMS', '请选择有效选项')
+  const kind = typeof field.value
+  const valid = field.type === 'checkbox' || kind === 'boolean' ? typeof value === 'boolean'
+    : kind === 'number' ? typeof value === 'number' && Number.isFinite(value) && (!Number.isInteger(field.value) || Number.isInteger(value))
+    : typeof value === 'string' || (field.value === null && value === null)
+  if (!valid || (typeof value === 'string' && value.length > 20000)) fail('INVALID_PARAMS', '参数类型或长度不正确')
+  if (Array.isArray(field.validate) && (typeof value !== 'number' || value < field.validate[0] || value > field.validate[1])) fail('INVALID_PARAMS', '数值超出允许范围')
+  if (field.validate === 'datetime' && (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value) || Number.isNaN(Date.parse(value.replace(' ', 'T'))))) fail('INVALID_PARAMS', '日期格式不正确')
+  return parts
+}
+
+export function createMockState({empty = false} = {}) {
+  const instances = new Map()
+  const startup = new Set()
+  const settings = {groups: [{key: 'Webui', label: 'WebUI 设置', fields: [
+    {key: 'WebuiHost', type: 'string', label: '监听地址', help: '模拟部署设置，仅在当前 mock 会话中保留。', value: '127.0.0.1', options: []},
+    {key: 'WebuiPort', type: 'int', label: '监听端口', help: '用于验证数值输入与保存。', value: 22267, options: []},
+    {key: 'Password', type: 'password', label: '访问密码', help: '留空保留原密码。', value: '', options: []},
+  ]}], notice: '前端测试数据', demo: false}
+  const get = name => instances.get(name) ?? fail('NOT_FOUND', '实例不存在')
+  const snapshot = name => ({instance: name, revision: revision(get(name).values), values: structuredClone(get(name).values)})
+  function log(name, text, level = 'INFO') {
+    const instance = get(name)
+    instance.logs.push({id: ++instance.cursor, level, text: `${timestamp(new Date())} [${name}] ${text}`})
+    instance.logs = instance.logs.slice(-400)
+  }
+  function add(name, values) {
+    instances.set(name, {values: structuredClone(values), status: 'stopped', logs: [], cursor: 0})
+    log(name, '测试实例已就绪，所有操作均为模拟。')
+  }
+  if (!empty) {
+    for (const [index, name] of ['demo-main', 'demo-alt', 'demo-error'].entries()) {
+      const values = structuredClone(template)
+      values.Alas.Emulator.Serial = `127.0.0.1:${5555 + index * 2}`
+      for (const [key, value] of Object.entries({Oil: 14200, Coin: 186420, Gem: 2468, Cube: 384})) {
+        values.Dashboard[key].Value = value - index * 100
+        values.Dashboard[key].Record = timestamp(new Date())
+      }
+      for (const [order, task] of ['Commission', 'Research', 'Dorm', 'Main'].entries()) {
+        values[task].Scheduler.Enable = true
+        values[task].Scheduler.NextRun = timestamp(new Date(Date.now() + (order - 1) * 1800000))
+      }
+      add(name, values)
+    }
+    get('demo-error').status = 'error'
+    get('demo-error').values.Alas.Storage.Storage = {failureCount: 3, lastError: '模拟器连接失败', retry: {enabled: false, remaining: 0}, tasks: ['Commission', 'Research']}
+    log('demo-error', '模拟器连接失败，请检查连接设置。', 'ERROR')
+  }
+  function overview(name) {
+    const data = snapshot(name)
+    return {instance: name, revision: data.revision, status: get(name).status, emulator: data.values.Alas.Emulator,
+      tasks: Object.entries(data.values).filter(([, groups]) => groups.Scheduler?.Enable).map(([task, groups]) => ({
+        name: task, label: translate(`Task.${task}.name`), nextRun: groups.Scheduler.NextRun,
+        pending: groups.Scheduler.NextRun <= timestamp(new Date()),
+      })),
+      resources: Object.entries(data.values.Dashboard).filter(([, resource]) => 'Value' in resource).map(([key, resource]) => ({
+        name: key, label: translate(`${key}._info.name`), value: resource.Value, limit: resource.Limit, record: resource.Record,
+      })),
+    }
+  }
+  function dispatch(method, input = {}) {
+    const params = structuredClone(input)
+    if (!Object.hasOwn(validators, method)) fail('METHOD_NOT_FOUND', '未知 API 方法')
+    if (!validators[method](params)) fail('INVALID_PARAMS', '请求参数不符合 API 契约')
+    const name = params.instance
+    if (name != null) get(name)
+    switch (method) {
+      case 'system.ping': return {pong: true}
+      case 'schema.get': return {args, menu, translations: locales[params.language]}
+      case 'instances.list': return [...instances].map(([name, item]) => ({name, status: item.status, serial: item.values.Alas.Emulator.Serial, server: item.values.Alas.Emulator.ServerName}))
+      case 'instances.create': {
+        if (!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(params.name) || /^(template|deploy|backup|con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(params.name)) fail('INVALID_PARAMS', '实例名称无效')
+        if ([...instances.keys()].some(name => name.toLowerCase() === params.name.toLowerCase())) fail('ALREADY_EXISTS', '同名实例已存在')
+        add(params.name, params.source ? get(params.source).values : template)
+        return snapshot(params.name)
+      }
+      case 'instances.delete':
+        if (get(name).status === 'running') fail('INSTANCE_RUNNING', '请先停止实例再删除')
+        if (params.revision !== snapshot(name).revision) fail('CONFLICT', '配置已变化，请重新加载后删除')
+        instances.delete(name); startup.delete(name)
+        return {deleted: name}
+      case 'config.get': return snapshot(name)
+      case 'config.patch': {
+        const data = snapshot(name)
+        if (params.revision !== data.revision) fail('CONFLICT', '配置已被其他页面修改，请重新加载后保存')
+        const seen = new Set()
+        for (const {path, value} of params.changes) {
+          const [task, group, arg] = validateField(path, value)
+          if (seen.has(path)) fail('INVALID_PARAMS', '同一次保存不能重复修改同一个参数')
+          seen.add(path)
+          data.values[task] ??= {}; data.values[task][group] ??= {}
+          data.values[task][group][arg] = value
+        }
+        get(name).values = data.values
+        log(name, `已保存 ${params.changes.length} 项配置。`)
+        return snapshot(name)
+      }
+      case 'overview.get': return overview(name)
+      case 'scheduler.start': case 'tasks.run':
+        if (get(name).status === 'running') fail('INSTANCE_RUNNING', '实例已在运行')
+        if (method === 'tasks.run' && params.task !== 'FleetScan' && !Object.values(menu).some(group => group.page === 'tool' && group.tasks.includes(params.task))) fail('INVALID_PARAMS', '该任务不支持单独运行')
+        get(name).status = 'running'; log(name, '模拟调度器已启动。')
+        return overview(name)
+      case 'scheduler.stop':
+        get(name).status = 'stopped'; log(name, '模拟调度器已停止。')
+        return overview(name)
+      case 'logs.get': {
+        const item = get(name)
+        const reset = params.after > item.cursor || params.after < (item.logs[0]?.id ?? 1) - 1
+        return {instance: name, cursor: item.cursor, reset, entries: item.logs.filter(entry => reset || entry.id > params.after)}
+      }
+      case 'preview.capture': {
+        if (get(name).status === 'error') fail('DEVICE_UNAVAILABLE', '模拟截图失败：请切换到正常实例测试预览')
+        const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720"><rect width="1280" height="720" fill="#142d3a"/><circle cx="640" cy="300" r="145" fill="none" stroke="#78dac4" stroke-width="3"/><path d="M640 190 720 370 640 330 560 370Z" fill="#78dac4"/><text x="640" y="530" text-anchor="middle" fill="#d5ede9" font-size="32">AzurPilot · 模拟器测试画面</text></svg>'
+        return {instance: name, image: `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`, capturedAt: new Date().toISOString()}
+      }
+      case 'statistics.resources': {
+        const base = get(name).values.Dashboard[params.resource]?.Value ?? 500
+        return {instance: name, resource: params.resource, truncated: false, points: name === 'demo-alt' ? [] : Array.from({length: 24}, (_, index) => ({
+          time: timestamp(new Date(Date.now() - (23 - index) * params.days * 3600000)), value: Math.max(0, Math.round(base * (.8 + index / 120 + Math.sin(index) * .03))),
+        }))}
+      }
+      case 'settings.get': return structuredClone(settings)
+      case 'settings.patch': {
+        const fields = settings.groups.flatMap(group => group.fields)
+        for (const [key, value] of Object.entries(params.values)) {
+          const field = fields.find(field => field.key === key)
+          if (!field || typeof value !== typeof field.value || (key === 'WebuiPort' && (!Number.isInteger(value) || value < 1 || value > 65535))) fail('INVALID_PARAMS', '部署设置无效')
+        }
+        for (const field of fields) if (field.key in params.values && field.key !== 'Password') field.value = params.values[field.key]
+        return {updated: Object.keys(params.values)}
+      }
+      case 'startup.get': return {enabled: startup.has(name)}
+      case 'startup.set':
+        if (params.enabled) startup.add(name); else startup.delete(name)
+        return {enabled: params.enabled}
+      case 'events.subscribe':
+        if (params.topics.some(topic => topic !== 'instances') && !name) fail('INVALID_PARAMS', '订阅此主题需要指定实例')
+        return {topics: params.topics, instance: name ?? null}
+      default: fail('METHOD_NOT_FOUND', '此方法由连接层处理')
+    }
+  }
+  function tick() {
+    for (const [name, item] of instances) if (item.status === 'running') log(name, '模拟任务正在运行，等待下一轮调度。')
+  }
+  return {dispatch, tick}
+}
