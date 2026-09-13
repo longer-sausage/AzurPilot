@@ -5,12 +5,12 @@ import { App } from './app/App'
 import { AppProvider } from './app/context'
 import { Overview } from './pages/Overview'
 import { TaskConfig } from './pages/TaskConfig'
-import { Logs } from './pages/Logs'
 import { Statistics } from './pages/Statistics'
 import { Settings } from './pages/Settings'
 import './styles/tokens.css'
 import './styles/layout.css'
 import './styles/components.css'
+import './styles/insights.css'
 
 class ErrorBoundary extends Component<{children: ReactNode}, {failed: boolean}> {
   state = {failed: false}
@@ -25,7 +25,7 @@ const router = createHashRouter([
   {path: '/i/:instance', element: <App/>, children: [
     {index: true, element: <Navigate to="overview" replace/>},
     {path: 'overview', element: <Overview/>}, {path: 'task/:task', element: <TaskConfig/>},
-    {path: 'logs', element: <Logs/>}, {path: 'statistics', element: <Statistics/>}, {path: 'settings', element: <Settings/>},
+    {path: 'logs', element: <Navigate to="../overview" replace/>}, {path: 'statistics', element: <Statistics/>}, {path: 'settings', element: <Settings/>},
   ]},
   {path: '*', element: <Navigate to="/" replace/>},
 ])

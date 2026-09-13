@@ -10,7 +10,7 @@ export interface Schema {
   translations: Record<string, unknown>
 }
 export interface Config { instance: string; revision: string; values: Values }
-export interface ScheduledTask { name: string; label: string; nextRun: string; pending: boolean }
+export interface ScheduledTask { name: string; label: string; nextRun: string; pending: boolean; state: 'running' | 'pending' | 'waiting' }
 export interface Resource { name: string; label: string; value: number | null; limit?: number; record?: string }
 export interface Overview {
   instance: string; revision: string; status: Status; tasks: ScheduledTask[]
@@ -18,8 +18,16 @@ export interface Overview {
 }
 export interface LogEntry { id: number; level: string; text: string }
 export interface Logs { instance: string; cursor: number; reset: boolean; entries: LogEntry[] }
-export interface Preview { instance: string; image: string; capturedAt: string }
+export interface Preview { instance: string; image: string | null; capturedAt: string | null }
 export interface Statistics { instance: string; resource: string; points: {time: string; value: number}[]; truncated: boolean }
+export interface StatPoint {time: string; value: number; source?: string}
+export interface StatSeries {key: string; label: string; points: StatPoint[]}
+export interface StatTable {title: string; columns: string[]; rows: Scalar[][]; note?: string}
+export interface StatisticsReport {
+  instance: string; category: string; month: string
+  metrics: {label: string; value: number | null; unit: string}[]
+  series: StatSeries[]; tables: StatTable[]; notes: string[]
+}
 export interface DeployField { key: string; type: string; label: string; help: string; value: Value; options: Value[] }
 export interface Settings { groups: {key: string; label: string; fields: DeployField[]}[]; notice: string; demo: boolean }
 export interface ApiEvent { v: 1; type: 'event'; topic: string; seq: number; data: unknown }
@@ -41,6 +49,8 @@ export interface Results {
   'logs.get': Logs
   'preview.capture': Preview
   'statistics.resources': Statistics
+  'statistics.report': StatisticsReport
+  'statistics.refreshLoot': {refreshed: boolean}
   'settings.get': Settings
   'settings.patch': {updated: string[]}
   'startup.get': {enabled: boolean}

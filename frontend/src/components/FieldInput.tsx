@@ -9,6 +9,8 @@ interface Props {
   options?: Value[]; disabled?: boolean; label: string; mode?: string; translateOption?: (value: Value) => string
 }
 export function FieldInput({id, value, onChange, type, options, disabled, label, mode, translateOption}: Props) {
+  // 只读时间沿用旧界面的原始文本，保留秒、小数秒和历史格式。
+  if (type === 'datetime' && disabled) return <input id={id} aria-label={label} readOnly value={String(value ?? '').replace('T', ' ')} />
   if (mode === 'yaml' || type === 'yaml') return <Suspense fallback={<div role="status">正在加载编辑器…</div>}><YamlEditor id={id} value={String(value ?? '')} onChange={onChange} disabled={disabled} label={label}/></Suspense>
   if (type === 'multiselect') return <div className="multi-options" id={id} role="group" aria-label={label}>{options?.map(option => {
     const selected = Array.isArray(value) ? value : []
@@ -29,9 +31,9 @@ export function FieldInput({id, value, onChange, type, options, disabled, label,
   const isNumber = typeof value === 'number' || type === 'int' || type === 'number'
   return <input id={id} disabled={disabled} type={type === 'password' ? 'password' : type === 'datetime' ? 'datetime-local' : isNumber ? 'number' : 'text'}
     step={type === 'datetime' ? 1 : 'any'} autoComplete={type === 'password' ? 'new-password' : 'off'}
-    value={type === 'datetime' ? String(value ?? '').replace(' ', 'T') : value === null ? '' : String(value)}
+    value={type === 'datetime' ? String(value ?? '').replace(' ', 'T').slice(0, 23) : value === null ? '' : String(value)}
     onChange={event => {
       const next = event.target.value
-      onChange(type === 'datetime' ? next.replace('T', ' ').padEnd(19, ':00') : isNumber && next !== '' ? Number(next) : next)
+      onChange(type === 'datetime' ? (next.length === 16 ? `${next.replace('T', ' ')}:00` : next.replace('T', ' ')) : isNumber && next !== '' ? Number(next) : next)
     }}/>
 }

@@ -28,6 +28,7 @@ export class ApiClient {
 
   connect = () => {
     if (this.socket && this.socket.readyState < 2) return
+    if (!this.password) { try { this.password = window.localStorage.getItem('azurpilot.access-password') ?? '' } catch { /* 浏览器禁用存储时保留会话登录。 */ } }
     this.stopped = false
     this.setState('connecting')
     const url = new URL('/api/v1/ws', window.location.href)
@@ -81,7 +82,14 @@ export class ApiClient {
   }
 
   async login(password: string) {
-    await this.request('auth.login', {password})
+    try { await this.request('auth.login', {password}) } catch (error) {
+      if (error instanceof ApiError && error.code === 'UNAUTHORIZED') {
+        this.password = ''
+        try { window.localStorage.removeItem('azurpilot.access-password') } catch { /* 存储不可用。 */ }
+      }
+      throw error
+    }
+    try { window.localStorage.setItem('azurpilot.access-password', password) } catch { /* 存储不可用时仍允许登录。 */ }
     this.password = password
     this.ready()
   }

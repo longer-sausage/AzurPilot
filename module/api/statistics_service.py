@@ -1,0 +1,174 @@
+"""复用既有统计源，为分类页面提供指标、时间线和可导出的明细。"""
+import math
+import threading
+from datetime import datetime, timedelta
+
+from module.api.protocol import ApiError
+
+
+_loot_lock = threading.Lock()
+
+
+def refresh_loot(configs, instance):
+    """只重算已有本地掉落记录，复用旧界面刷新操作。"""
+    configs.path(instance)
+    from module.statistics.azurstats import AzurStats
+    with _loot_lock:
+        AzurStats.get_meowofficer_farming()
+    return {'refreshed': True}
+
+
+RESOURCE_LABELS = {
+    'Oil': '石油', 'Coin': '物资', 'Gem': '钻石', 'Cube': '心智魔方', 'Pt': '活动 PT',
+    'Core': '核心数据', 'Medal': '荣誉勋章', 'Merit': '功勋', 'GuildCoin': '舰队币',
+    'ActionPoint': '行动力', 'YellowCoin': '作战补给凭证', 'PurpleCoin': '特别兑换凭证',
+}
+
+
+def table(title, columns, rows, note=''):
+    return {'title': title, 'columns': columns, 'rows': rows, 'note': note}
+
+
+def series(rows, key, label):
+    """保留真实采集时间与来源，跳过无效值，绝不把缺失值补成零。"""
+    points = []
+    for row in rows:
+        value = row.get(key)
+        try:
+            timestamp = datetime.fromisoformat(str(row['ts']))
+            if value is None or not math.isfinite(float(value)):
+                continue
+        except (KeyError, ValueError, TypeError):
+            continue
+        points.append({'time': timestamp.isoformat(sep=' '), 'value': float(value),
+                       'source': row.get('source', '')})
+    points.sort(key=lambda item: item['time'])
+    return {'key': key, 'label': label, 'points': points}
+
+
+def report(configs, instance, category, month, days, period):
+    configs.path(instance)
+    now = datetime.now()
+    try:
+        selected = datetime.strptime(month, '%Y-%m') if month else now.replace(day=1)
+    except ValueError as exc:
+        raise ApiError('INVALID_PARAMS', '月份格式应为 YYYY-MM') from exc
+    if not 2020 <= selected.year <= 9998:
+        raise ApiError('INVALID_PARAMS', '统计月份应在 2020 至 9998 年之间')
+    year, month_number = selected.year, selected.month
+    result = {'instance': instance, 'category': category, 'month': f'{year:04d}-{month_number:02d}',
+              'metrics': [], 'series': [], 'tables': [], 'notes': []}
+
+    def metric(label, value, unit=''):
+        result['metrics'].append({'label': label, 'value': value, 'unit': unit})
+
+    if category == 'resources':
+        from module.statistics.resource_stats import RESOURCE_COLUMNS, get_resource_timeline
+        rows = get_resource_timeline(instance, limit=50001)
+        cutoff = (now - timedelta(days=days)).isoformat(sep=' ')
+        rows = [row for row in rows if str(row['ts']).replace('T', ' ') >= cutoff]
+        if len(rows) > 50000:
+            result['notes'].append('记录超过 50,000 条，当前展示最近 50,000 条，请缩短时间范围查看细节。')
+            rows = rows[-50000:]
+        result['series'] = [series(rows, key, RESOURCE_LABELS[name]) for name, key in RESOURCE_COLUMNS.items()]
+        result['notes'].append('区间变化为首末采集值之差，不等同于总收入；未采集的数据保持缺失。')
+        return result
+
+    from module.statistics.cl1_database import db
+    if category == 'opsi':
+        from module.statistics.opsi_month import get_opsi_stats, compute_monthly_cl1_akashi_ap
+        summary = get_opsi_stats(instance).summary(year, month_number)
+        battles = summary['total_battles']
+        # 沿用旧界面口径：向上取整，每轮侵蚀1消耗 5 行动力。
+        rounds = (battles + 1) // 2
+        cost = rounds * 5
+        purchased = compute_monthly_cl1_akashi_ap(year, month_number, instance_name=instance)
+        encounters = summary['akashi_encounters']
+        devices = summary['siren_research_devices']
+        for label, value, unit in [
+            ('战斗次数', battles, '场'), ('出击轮数', rounds, '轮'), ('出击消耗', cost, '行动力'),
+            ('明石遭遇', encounters, '次'), ('明石遭遇率', round(encounters / rounds * 100, 2) if rounds else None, '%'),
+            ('塞壬研究装置', devices, '个'), ('装置获取率', round(devices / rounds * 100, 2) if rounds else None, '%'),
+            ('购买行动力', purchased, ''), ('平均每次购买', round(purchased / encounters, 2) if encounters else None, ''),
+            ('净行动力', purchased - cost, ''), ('循环效率', round((purchased - cost) / cost * 100, 2) if cost else None, '%'),
+        ]:
+            metric(label, value, unit)
+        rows = []
+        for hazard in (3, 5):
+            data = db.get_meow_stats(instance, year, month_number, hazard_level=hazard)
+            rows.append([hazard, data.get('battle_count'), data.get('effective_rounds'),
+                         data.get('avg_battle_time'), data.get('avg_round_time'),
+                         data.get('siren_research_devices'), round(data.get('siren_research_rate', 0) * 100, 2),
+                         {'exact': '实测', 'estimated': '估算', 'none': '暂无记录'}.get(data.get('by_hazard', {}).get(str(hazard), {}).get('source', 'none'))])
+        result['tables'].append(table('短猫运行统计', ['侵蚀等级', '战斗次数', '有效轮数', '平均战斗秒数', '平均每轮秒数', '研究装置', '获取率（%）', '统计来源'], rows))
+        result['notes'].append('侵蚀1沿用旧口径：轮数 = 向上取整（战斗次数 ÷ 2），消耗 = 轮数 × 5；净行动力 = 明石购买 − 出击消耗。')
+    elif category == 'action':
+        from module.statistics.opsi_month import get_ap_timeline, get_coins_timeline
+        ap = get_ap_timeline(year, month_number, instance)
+        coins = get_coins_timeline(year, month_number, instance)
+        result['series'] = [series(ap, 'ap', '行动力'), series(ap, 'asset', '行动力资产'),
+                            series(ap, 'distance', '海里数'), series(coins, 'yellow_coins', '作战补给凭证'),
+                            series(coins, 'purple_coins', '特别兑换凭证')]
+        result['notes'].append('保留每种资源的独立采样时间，不用相邻资源的时间戳替代。资产与海里数仅在原记录包含时展示。')
+    elif category == 'commission':
+        from module.statistics.commission_income_stats import get_commission_income_interval_summary
+        start = selected.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        end = (start.replace(day=28) + timedelta(days=4)).replace(day=1)
+        if period != 'month':
+            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            if period == 'week':
+                start -= timedelta(days=start.weekday())
+            end = now
+        summary = get_commission_income_interval_summary(instance, start, end)
+        metric('完成委托', summary['total_commissions'], '项')
+        labels = {**RESOURCE_LABELS, 'Chip': '心智单元'}
+        for name, item in summary['items'].items():
+            metric(labels[name], item['total'])
+        result['tables'].append(table('委托收益明细', ['资源', '总收益', '掉落记录数', '平均每次掉落'],
+            [[labels[item['name']], item['total'], item['count'], item['avg']] for item in summary['detail_rows']]))
+        entries = []
+        cursor = start.replace(day=1)
+        while cursor < end:
+            entries.extend(db.get_commission_income(instance, cursor.year, cursor.month))
+            cursor = (cursor.replace(day=28) + timedelta(days=4)).replace(day=1)
+        entries = [item for item in entries if start.isoformat(sep=' ') <= str(item.get('ts', '')).replace('T', ' ') < end.isoformat(sep=' ')]
+        entries.sort(key=lambda item: item['ts'])
+        from module.statistics.commission_income_stats import COMMISSION_ITEM_NAME_MAP
+        normalized = [{**item, 'items': {COMMISSION_ITEM_NAME_MAP.get(k, k): v for k, v in item.get('items', {}).items()}} for item in entries]
+        result['tables'].append(table('委托结算记录', ['时间', '委托数量', '钻石', '魔方', '心智单元', '石油', '物资'],
+            [[item['ts'], item.get('commission_count', 1), *[item['items'].get(k) for k in ('Gem', 'Cube', 'Chip', 'Oil', 'Coin')]] for item in normalized]))
+        result['series'] = [series([{'ts': item['ts'], **item['items']} for item in normalized], k, labels[k]) for k in ('Gem', 'Cube', 'Chip', 'Oil', 'Coin')]
+        result['notes'].append('图表表示每次结算收益。平均值按出现该资源的记录数计算；无结算记录时显示“—”。今日/本周使用当前日期，月度使用选定月份。')
+    elif category == 'ships':
+        from module.statistics.ship_exp_stats import ShipExpStats
+        from module.statistics.opsi_month import get_opsi_stats
+        stats = ShipExpStats(instance_name=instance)
+        data = stats.data
+        metric('目标等级', data.get('target_level', 125))
+        metric('预估经验效率', stats.get_exp_per_hour(), '/小时')
+        metric('平均战斗时长', stats.get_average_battle_time(), '秒')
+        metric('平均每轮时长', stats.get_average_round_time(), '秒')
+        metric('短猫平均战斗时长', stats.get_average_meow_battle_time(), '秒')
+        today = stats.get_today_stats() or {}
+        metric('今日战斗', today.get('battle_count'), '场')
+        metric('今日经验', today.get('total_exp_gained'))
+        metric('今日运行', round(today['total_run_time'] / 60, 1) if 'total_run_time' in today else None, '分钟')
+        battles = get_opsi_stats(instance).summary()['total_battles']
+        progress = stats.get_all_progress(battles)
+        result['tables'].append(table('舰船升级进度', ['位置', '等级', '当前经验', '累计经验', '目标经验', '检测后战斗数', '还需经验', '还需战斗', '预估用时'],
+            [[p.get(k) for k in ('position', 'level', 'current_exp', 'total_exp', 'target_exp', 'battles_done', 'exp_needed', 'battles_needed', 'time_needed')] for p in progress],
+            f"上次检测：{data.get('last_check_time', '尚未检测')}；舰队：{data.get('fleet_index', '—')}。"))
+        daily = [{'ts': key, **value} for key, value in sorted(data.get('daily_stats', {}).items())]
+        result['series'] = [series(daily, 'total_exp_gained', '每日经验'), series(daily, 'battle_count', '每日战斗'), series(daily, 'total_run_time', '每日运行秒数')]
+        result['notes'].append('舰船与经验展示最新检测及全部保留的日记录。效率、所需战斗和用时均为沿用旧公式的估算，缺少时长样本时使用旧默认值。')
+    elif category == 'loot':
+        from module.statistics.azurstats import AzurStats
+        rows = []
+        with _loot_lock:
+            cached = AzurStats.load_meowofficer_farming()
+        for row in cached:
+            if row[2] > 0:
+                rows.append([int(row[0]), datetime.fromtimestamp(row[1]).isoformat(sep=' '), float(row[2]), *[round(float(value), 4) for value in row[3:]]])
+        result['tables'].append(table('短猫掉落收益', AzurStats.meowofficer_farming_labels, rows))
+        result['notes'].append('沿用旧版全设备累计掉落缓存，不按当前实例或月份过滤；上次记录时间见表格。')
+    return result

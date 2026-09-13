@@ -1,8 +1,6 @@
 """运行状态、日志和截图适配层，浏览器断开不会停止任务。"""
-import base64
 import io
 import re
-import subprocess
 import threading
 from datetime import datetime, timedelta
 
@@ -10,7 +8,6 @@ from rich.console import Console
 
 from module.api.protocol import ApiError
 from module.runtime.process_manager import ProcessManager
-from module.runtime.setting import State
 
 STATES = {1: 'running', 2: 'stopped', 3: 'error', 4: 'updating'}
 
@@ -39,17 +36,21 @@ class RuntimeService:
         data, revision = self.configs.read(instance)
         manager = ProcessManager._processes.get(instance)
         tasks = []
-        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        from module.config.time_source import now as current_time
+        now = current_time().isoformat(sep=' ')
+        running = getattr(manager, 'current_task', None) if manager and manager.state == 1 else None
         for task, groups in data.items():
             scheduler = groups.get('Scheduler', {})
-            if scheduler.get('Enable'):
+            if scheduler.get('Enable') or task == running:
                 next_run = str(scheduler.get('NextRun', ''))
                 tasks.append({'name': task, 'label': self.configs.translate(f'Task.{task}.name'),
-                              'nextRun': next_run, 'pending': next_run <= now})
+                              'nextRun': next_run, 'pending': next_run.replace('T', ' ') <= now,
+                              'state': 'running' if task == running else 'pending' if next_run.replace('T', ' ') <= now else 'waiting'})
         from module.config.task_priority import parse_task_priority
         priority = parse_task_priority(data.get('General', {}).get('YukikazeTaskManager', {}).get('TaskPriorityAdjustment'))
         order = {task: index for index, task in enumerate(priority)}
-        tasks.sort(key=lambda item: (0, order.get(item['name'], len(order))) if item['pending'] else (1, item['nextRun']))
+        tasks.sort(key=lambda item: (-1, 0) if item['state'] == 'running' else
+                   (0, order.get(item['name'], len(order))) if item['pending'] else (1, item['nextRun']))
         resources = [{'name': name, 'label': self.configs.translate(f'{name}._info.name'),
                       'value': values.get('Value'), 'limit': values.get('Limit'), 'record': values.get('Record')}
                      for name, values in data.get('Dashboard', {}).items() if 'Value' in values]
@@ -110,35 +111,15 @@ class RuntimeService:
                     'entries': [entry for entry in entries if reset or entry['id'] > after]}
 
     def capture(self, instance):
-        data, _ = self.configs.read(instance)
-        serial = data.get('Alas', {}).get('Emulator', {}).get('Serial', 'auto')
-        adb = State.deploy_config.AdbExecutable or 'adb'
-        flags = {'creationflags': subprocess.CREATE_NO_WINDOW} if hasattr(subprocess, 'CREATE_NO_WINDOW') else {}
-        try:
-            if serial == 'auto':
-                devices = subprocess.run([adb, 'devices'], capture_output=True, timeout=5, check=True, **flags)
-                serials = [line.split()[0] for line in devices.stdout.decode().splitlines()[1:]
-                           if line.strip().endswith('\tdevice')]
-                if len(serials) != 1:
-                    raise ApiError('DEVICE_UNAVAILABLE', '请在连接设置中指定在线模拟器序列号')
-                serial = serials[0]
-            result = subprocess.run([adb, '-s', serial, 'exec-out', 'screencap', '-p'],
-                                    capture_output=True, timeout=8, check=True, **flags)
-            if not result.stdout.startswith(b'\x89PNG') or len(result.stdout) > 8 * 1024 * 1024:
-                raise ApiError('DEVICE_UNAVAILABLE', '模拟器未返回有效截图')
-            from PIL import Image
-            with Image.open(io.BytesIO(result.stdout)) as screenshot:
-                output = io.BytesIO()
-                screenshot.convert('RGB').save(output, format='JPEG', quality=75)
-            return {'instance': instance, 'image': 'data:image/jpeg;base64,' + base64.b64encode(output.getvalue()).decode(),
-                    'capturedAt': datetime.now().isoformat()}
-        except (OSError, subprocess.SubprocessError) as exc:
-            raise ApiError('DEVICE_UNAVAILABLE', '无法连接模拟器，请检查 ADB 路径、序列号和设备状态') from exc
+        """兼容旧方法名，只返回运行器已产生的最新帧，绝不主动截图。"""
+        self.configs.path(instance)
+        from module.runtime.preview import hub
+        return hub.get(instance)
 
     def statistics(self, instance, days, resource):
         self.configs.path(instance)
-        from module.statistics.resource_stats import get_resource_timeline
-        key = 'action_point' if resource == 'ActionPoint' else resource.lower()
+        from module.statistics.resource_stats import get_resource_timeline, RESOURCE_COLUMNS
+        key = RESOURCE_COLUMNS[resource]
         cutoff = (datetime.now() - timedelta(days=days)).isoformat(sep=' ')
         rows = get_resource_timeline(instance=instance, limit=5000)
         points = [{'time': row['ts'], 'value': row.get(key)} for row in rows

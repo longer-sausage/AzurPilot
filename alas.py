@@ -870,6 +870,8 @@ class AzurLaneAutoScript:
                 False — 不可恢复的失败，计入连续失败限制。
                 'recoverable' — 可恢复的失败，不计入连续失败限制。
         """
+        from module.runtime.preview import set_task
+        set_task(inflection.camelize(command))
         try:
             if not skip_first_screenshot:
                 self.device.screenshot()
@@ -1162,6 +1164,8 @@ class AzurLaneAutoScript:
                 content=f"<{self.config_name}> 发生异常 正在尝试自动重启恢复喵~",
             )
             return 'recoverable'
+        finally:
+            set_task(None)
 
     def keep_last_errlog(self, folder_path, n: int = 30):
         """

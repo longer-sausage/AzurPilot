@@ -59,6 +59,8 @@ export function createMockState({empty = false} = {}) {
   if (!empty) {
     for (const [index, name] of ['demo-main', 'demo-alt', 'demo-error'].entries()) {
       const values = structuredClone(template)
+      values.Main.Emotion.Fleet1Record = '2026-09-12 23:45:12.123456'
+      values.Main.Scheduler.NextRun = '2099-01-01 12:00:00'
       values.Alas.Emulator.Serial = `127.0.0.1:${5555 + index * 2}`
       for (const [key, value] of Object.entries({Oil: 14200, Coin: 186420, Gem: 2468, Cube: 384})) {
         values.Dashboard[key].Value = value - index * 100
@@ -79,6 +81,7 @@ export function createMockState({empty = false} = {}) {
     return {instance: name, revision: data.revision, status: get(name).status, emulator: data.values.Alas.Emulator,
       tasks: Object.entries(data.values).filter(([, groups]) => groups.Scheduler?.Enable).map(([task, groups]) => ({
         name: task, label: translate(`Task.${task}.name`), nextRun: groups.Scheduler.NextRun,
+        state: get(name).status === 'running' && task === 'Commission' ? 'running' : groups.Scheduler.NextRun <= timestamp(new Date()) ? 'pending' : 'waiting',
         pending: groups.Scheduler.NextRun <= timestamp(new Date()),
       })),
       resources: Object.entries(data.values.Dashboard).filter(([, resource]) => 'Value' in resource).map(([key, resource]) => ({
@@ -138,9 +141,21 @@ export function createMockState({empty = false} = {}) {
         return {instance: name, cursor: item.cursor, reset, entries: item.logs.filter(entry => reset || entry.id > params.after)}
       }
       case 'preview.capture': {
-        if (get(name).status === 'error') fail('DEVICE_UNAVAILABLE', '模拟截图失败：请切换到正常实例测试预览')
+        if (!get(name).previewAt) return {instance: name, image: null, capturedAt: null}
         const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720"><rect width="1280" height="720" fill="#142d3a"/><circle cx="640" cy="300" r="145" fill="none" stroke="#78dac4" stroke-width="3"/><path d="M640 190 720 370 640 330 560 370Z" fill="#78dac4"/><text x="640" y="530" text-anchor="middle" fill="#d5ede9" font-size="32">AzurPilot · 模拟器测试画面</text></svg>'
-        return {instance: name, image: `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`, capturedAt: new Date().toISOString()}
+        return {instance: name, image: `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`, capturedAt: get(name).previewAt ?? null}
+      }
+      case 'statistics.refreshLoot': return {refreshed: true}
+      case 'statistics.report': {
+        const labels = {Oil: '石油', Coin: '物资', Gem: '钻石', Cube: '心智魔方', ActionPoint: '行动力', YellowCoin: '作战补给凭证', PurpleCoin: '特别兑换凭证'}
+        const series = Object.entries(labels).map(([key, label]) => ({key, label, points: dispatch('statistics.resources', {instance: name, resource: key, days: params.days}).points}))
+        const result = {instance: name, category: params.category, month: params.month, metrics: [], series: [], tables: [], notes: ['前端模拟数据，仅用于交互验证。']}
+        if (['resources', 'action', 'ships', 'commission'].includes(params.category)) result.series = series
+        if (!['resources', 'action'].includes(params.category)) {
+          result.metrics = [{label: '战斗次数', value: 1234, unit: '场'}, {label: '净行动力', value: 345, unit: ''}]
+          result.tables = [{title: '统计明细', columns: ['项目', '数量', '记录时间'], rows: name === 'demo-alt' ? [] : [['测试数据', 1234, timestamp(new Date())]]}]
+        }
+        return result
       }
       case 'statistics.resources': {
         const base = get(name).values.Dashboard[params.resource]?.Value ?? 500
@@ -169,7 +184,10 @@ export function createMockState({empty = false} = {}) {
     }
   }
   function tick() {
-    for (const [name, item] of instances) if (item.status === 'running') log(name, '模拟任务正在运行，等待下一轮调度。')
+    for (const [name, item] of instances) if (item.status === 'running') {
+      item.previewAt = new Date().toISOString()
+      log(name, '模拟任务正在运行，等待下一轮调度。')
+    }
   }
   return {dispatch, tick}
 }

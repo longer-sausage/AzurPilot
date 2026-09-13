@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { Anchor, ArrowRight, ChartNoAxesCombined, ChevronDown, Compass, LayoutDashboard, Menu, Plus, Search, Settings2, Terminal, Wifi, WifiOff, X } from 'lucide-react'
+import { Anchor, ArrowRight, ChartNoAxesCombined, ChevronDown, Compass, LayoutDashboard, Menu, Plus, Search, Settings2, Wifi, WifiOff, X } from 'lucide-react'
 import { api } from '../api/client'
 import { useApp, useConnection } from './context'
 import { ErrorBox, Loading, Modal, StatusBadge } from '../components/ui'
@@ -78,7 +78,7 @@ export function App() {
     <aside className="sidebar"><div className="sidebar-brand"><span>AzurPilot<span className="brand-dot">.</span></span><small>自动化指挥中心</small><button className="mobile-close icon-button" aria-label="关闭导航" onClick={() => setMobileOpen(false)}><X size={18}/></button></div>
       <InstanceSwitcher onCreate={() => setCreating(true)}/>
       <div className="sidebar-label">工作空间</div>
-      <nav className="primary-nav"><NavLink to={`${base}/overview`}><LayoutDashboard size={17}/>运行总览<span className="nav-pill">总览</span></NavLink><NavLink to={`${base}/logs`}><Terminal size={17}/>运行日志</NavLink><NavLink to={`${base}/statistics`}><ChartNoAxesCombined size={17}/>资源统计</NavLink><NavLink to={`${base}/settings`}><Settings2 size={17}/>系统设置</NavLink></nav>
+      <nav className="primary-nav"><NavLink to={`${base}/overview`}><LayoutDashboard size={17}/>运行总览<span className="nav-pill">总览</span></NavLink><NavLink to={`${base}/statistics`}><ChartNoAxesCombined size={17}/>资源统计</NavLink><NavLink to={`${base}/settings`}><Settings2 size={17}/>系统设置</NavLink></nav>
       <div className="sidebar-label">任务配置 <span>{schema ? Object.values(schema.menu).flatMap(group => group.tasks).length : '—'}</span></div>
       <div className="nav-search"><Search size={14}/><input aria-label="搜索任务" value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索任务…"/></div>
       <nav className="task-nav">{schema && Object.entries(schema.menu).map(([key, group]) => {

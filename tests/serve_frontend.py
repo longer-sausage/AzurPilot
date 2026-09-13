@@ -26,10 +26,16 @@ def main():
         def reject_execution(*args, **kwargs):
             from module.api.protocol import ApiError
             raise ApiError('TEST_ENVIRONMENT', '浏览器测试服务不会执行游戏任务')
-        runtime.start = runtime.stop = runtime.capture = reject_execution
+        runtime.start = runtime.stop = reject_execution
         runtime.statistics = lambda instance, days, resource: {
             'instance': instance, 'resource': resource, 'points': [], 'truncated': False,
         }
+        from module.api.router import Method
+        from module.api.protocol import StatisticsReportParams
+        app.state.gateway.router.methods['statistics.report'] = Method(StatisticsReportParams, lambda params: {
+            'instance': params.instance, 'category': params.category, 'month': params.month,
+            'metrics': [], 'series': [{'key': 'oil', 'label': '石油', 'points': []}], 'tables': [], 'notes': [],
+        })
         uvicorn.run(app, host='127.0.0.1', port=22391, log_level='warning')
 
 

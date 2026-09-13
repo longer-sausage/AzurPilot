@@ -49,7 +49,7 @@ export function TaskConfig() {
   }
   async function run() {
     setBusy(true)
-    try {await api.request('tasks.run', {instance, task}); navigate(`/i/${instance}/logs`); notify('任务已启动')}
+    try {await api.request('tasks.run', {instance, task}); navigate(`/i/${instance}/overview`); notify('任务已启动')}
     catch (error) {setError((error as Error).message)} finally {setBusy(false); setConfirmRun(false)}
   }
   const groups = schema?.args[task]

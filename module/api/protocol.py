@@ -72,7 +72,14 @@ class LogsParams(InstanceParams):
 
 class StatisticsParams(InstanceParams):
     days: StrictInt = Field(default=7, ge=1, le=90)
-    resource: Literal['Oil', 'Coin', 'Gem', 'Cube', 'Pt', 'ActionPoint'] = 'Oil'
+    resource: Literal['Oil', 'Coin', 'Gem', 'Cube', 'Pt', 'ActionPoint', 'Core', 'Medal', 'Merit', 'GuildCoin', 'YellowCoin', 'PurpleCoin'] = 'Oil'
+
+
+class StatisticsReportParams(InstanceParams):
+    category: Literal['resources', 'action', 'opsi', 'commission', 'ships', 'loot'] = 'resources'
+    month: StrictStr | None = Field(default=None, pattern=r'^\d{4}-(0[1-9]|1[0-2])$')
+    days: StrictInt = Field(default=7, ge=1, le=365)
+    period: Literal['day', 'week', 'month'] = 'month'
 
 
 class DeployParams(Params):

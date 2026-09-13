@@ -31,12 +31,22 @@ class Router:
             'tasks.run': Method(p.TaskParams, lambda x: runtime.start(x.instance, x.task), True),
             'logs.get': Method(p.LogsParams, lambda x: runtime.logs(x.instance, x.after)),
             'preview.capture': Method(p.InstanceParams, lambda x: runtime.capture(x.instance)),
+            'statistics.refreshLoot': Method(p.InstanceParams, self.refresh_loot, True),
+            'statistics.report': Method(p.StatisticsReportParams, self.statistics_report),
             'statistics.resources': Method(p.StatisticsParams, lambda x: runtime.statistics(x.instance, x.days, x.resource)),
             'settings.get': Method(p.Params, self.settings),
             'settings.patch': Method(p.DeployParams, self.save_settings, True),
             'startup.get': Method(p.InstanceParams, self.get_startup),
             'startup.set': Method(p.StartupParams, self.set_startup, True),
         }
+
+    def refresh_loot(self, params):
+        from module.api.statistics_service import refresh_loot
+        return refresh_loot(self.configs, params.instance)
+
+    def statistics_report(self, params):
+        from module.api.statistics_service import report
+        return report(self.configs, params.instance, params.category, params.month, params.days, params.period)
 
     def dispatch(self, method, params):
         entry = self.methods.get(method)
@@ -53,8 +63,11 @@ class Router:
             if manager.alive:
                 raise p.ApiError('INSTANCE_RUNNING', '请先停止实例再删除')
             result = self.configs.delete(params.instance, params.revision)
+            manager.run_id = None
             ProcessManager.remove_manager(params.instance)
             self.runtime.logs_cache.pop(params.instance, None)
+            from module.runtime.preview import hub
+            hub.discard(params.instance)
             return result
 
     def settings(self, _):

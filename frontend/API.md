@@ -12,7 +12,7 @@
 {"v":1,"type":"event","topic":"session","seq":1,"data":{"authRequired":true,"protocolVersion":1}}
 ```
 
-若需要认证，先调用 `auth.login`。认证前不能调用业务方法或订阅。密码来自现有 `--key` 或部署文件的 Password；通配地址监听且未设置密码时延用随机密码生成策略。认证材料放在消息体中，不放在 URL、本地存储或日志中。客户端仅在当前页面内存中保留密码用于重连，重新打开页面需要重新登录。
+若需要认证，先调用 `auth.login`。认证前不能调用业务方法或订阅。密码来自现有 `--key` 或部署文件的 Password；通配地址监听且未设置密码时延用随机密码生成策略。认证材料只通过消息体传输，不放在 URL 或日志中。按用户要求恢复密码记忆：登录成功后访问密码保存在当前浏览器同源 localStorage，刷新、重新打开页面和断线重连自动登录；密码失效时删除旧值并重新显示登录页。浏览器禁止存储时仅保留本页登录。
 
 ```json
 {"v":1,"type":"request","id":"login-1","method":"auth.login","params":{"password":"访问密码"}}
@@ -61,8 +61,10 @@
 | `scheduler.stop` | instance | 停止调度器并执行配置的收尾动作 |
 | `tasks.run` | instance、task | 运行允许单独执行的工具 |
 | `logs.get` | instance、可选 after | 游标之后的日志，有界保留 |
-| `preview.capture` | instance | 一张 JPEG data URL 及采集时间 |
-| `statistics.resources` | instance、days、resource | 资源时间线，最多 5,000 点 |
+| `preview.capture` | instance | 读取最近一张缓存 JPEG；不主动截图，无缓存时 image/capturedAt 为 null |
+| `statistics.resources` | instance、days、resource | 兼容资源时间线，支持全部 12 种资源，最多 5,000 点 |
+| `statistics.report` | instance、category、month、days、period | 六类统计，返回 metrics、series、tables 和 notes |
+| `statistics.refreshLoot` | instance | 重新聚合本设备已有本地短猫掉落记录，不访问游戏 |
 | `settings.get` | 无 | 部署设置定义及值，密码只写不读 |
 | `settings.patch` | values | 校验并保存部署设置，重启生效 |
 | `startup.get` | instance | 当前实例是否启动时自动运行 |
@@ -93,7 +95,7 @@ API 和核心运行器共用跨进程事务锁。运行器保存时重新读取�
 {"v":1,"type":"request","id":"subscribe-1","method":"events.subscribe","params":{"instance":"alas","topics":["instances","overview","logs"]}}
 ```
 
-支持 `instances`、`overview`、`logs`、`preview`。除 `instances` 外必须提供 instance；空 topics 表示取消订阅。订阅会立即生效，并在下一次采样时发送初始快照。默认两秒采样，内容未变化时不发送。预览需显式开启，至少三秒一次。
+支持 `instances`、`overview`、`logs`、`preview`。除 `instances` 外必须提供 instance；空 topics 表示取消订阅。订阅会立即生效，并在下一次采样时发送初始快照。默认两秒采样，内容未变化时不发送。预览在总览切换到截图时订阅，在每次已有截图完成后通过独立事件通道推送，不使用轮询计时器，不访问 ADB 或额外调用截图后端。
 
 ```json
 {"v":1,"type":"event","topic":"overview","seq":2,"data":{"instance":"alas","status":"stopped","revision":"SHA256","tasks":[],"resources":[],"emulator":{}}}
@@ -103,7 +105,7 @@ API 和核心运行器共用跨进程事务锁。运行器保存时重新读取�
 
 日志响应包含 `cursor`、`reset`、`entries`。每条日志有单调递增的 `id`、`level` 和纯文本 `text`。服务及页面各保留最多 400 条；客户端游标落后缓冲区或服务重启时返回 reset，客户端替换窗口。清空页面只影响当前视图，不删除服务端日志。完整运行日志仍由原有文件日志系统保存。
 
-单连接发送队列最多 32 条，慢客户端以 1013 关闭并重新同步。网络断开不停止任务。预览/实例读取失败会发送 `subscription.error`，包含 topic、instance、code、message；其他订阅继续运行。
+单连接控制消息队列最多 32 条，慢客户端以 1013 关闭并重新同步。预览只占一个待发送槽，新帧替换未发送旧帧，事件序号按实际发送顺序分配。网络断开不停止任务。预览/实例读取失败会发送 `subscription.error`，包含 topic、instance、code、message；其他订阅继续运行。
 
 ## 错误码
 
@@ -127,3 +129,17 @@ INTERNAL_ERROR 不向浏览器返回堆栈；参数校验详情不回显输入�
 5. v1 只允许兼容性新增；删除方法、更换字段语义或类型需要新版本路径。
 
 前端构建方式参考 [React 官方说明](https://react.dev/learn/build-a-react-app-from-scratch)，开发代理行为参考 [Vite 官方文档](https://vite.dev/config/server-options.html)。
+
+## 总览任务状态与被动预览
+
+任务条目新增 `state: running | pending | waiting`，兼容保留 `pending` 字段。运行中由工作进程在任务进入和 finally 退出时发送明确的状态事件，等待/待执行按核心校准时间与 NextRun 比较；运行任务优先展示，停止或异常进程不会残留运行状态。
+
+`module/device/screenshot.py` 的统一入口在截图后投递 RGB 图像。`module/runtime/preview.py` 在后台编码 JPEG，通过有界跨进程队列交给父进程，再通知 WebSocket。所有已注册截图后端共用这条路径；未安装通道的独立脚本不额外编码。运行批次标识隔离重启前后的任务状态与截图。没有新截图时保留原帧和采集时间，API 不会启动截图任务。
+
+## 分类统计
+
+`category` 支持 `resources`（12 种资源）、`action`（行动力、资产、海里、黄币、紫币）、`opsi`（侵蚀1与短猫运行）、`commission`（收益与结算记录）、`ships`（升级进度、经验与时长）、`loot`（累计短猫掉落）。
+
+资源页支持最近 1–365 天，最多读取最近 50,000 行快照并明确提示截断。大世界与行动力按月份读取；委托支持今日、本周、选定月份，周统计跨月读取。舰船展示最新检测与保留的历史日记录；掉落缓存沿用旧版全设备累计口径，不假装按实例或月份隔离。
+
+图表保留独立采样时间和空值语义；聚合折线取桶末值，K 线取开、高、低、收，日聚合按浏览器本地自然日分桶。CSV 导出保留原始精度，明细支持分页、排序、搜索和导出。侵蚀1沿用旧界面口径：轮数向上取整，每轮消耗 5 行动力；舰船效率与升级用时沿用原有估算公式。

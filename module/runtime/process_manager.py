@@ -12,6 +12,7 @@ import argparse
 from collections.abc import Sequence
 import os
 import queue
+import uuid
 import subprocess
 import threading
 import time
@@ -55,6 +56,9 @@ class ProcessManager:
     def __init__(self, config_name: str = DEFAULT_CONFIG_NAME) -> None:
         self.config_name = config_name
         self._renderable_queue: queue.Queue[ConsoleRenderable] = State.manager.Queue()
+        self._preview_queue = None
+        self.current_task = None
+        self.run_id = None
         self.renderables: List[ConsoleRenderable] = []
         self.renderables_max_length = 400
         self.renderables_reduce_length = 80
@@ -134,11 +138,18 @@ class ProcessManager:
                         return
                     if func is None:
                         func = get_config_mod(self.config_name)
+                    self.current_task = None
+                    self.run_id = uuid.uuid4().hex
+                    self._preview_queue = State.manager.Queue(maxsize=2)
+                    from module.runtime.preview import hub
+                    hub.publish(self.config_name, {"instance": self.config_name, "image": None, "capturedAt": None})
                     args = (
                         self.config_name,
                         func,
                         self._renderable_queue,
                         ev,
+                        self._preview_queue,
+                        self.run_id,
                     )
                     process = Process(
                         target=ProcessManager.run_process,
@@ -159,6 +170,8 @@ class ProcessManager:
             State.restart_lock.release()
 
     def start_log_queue_handler(self) -> None:
+        threading.Thread(target=self._thread_preview_queue_handler,
+                         args=(self._preview_queue, self.run_id), daemon=True).start()
         log_queue_handler = self.thd_log_queue_handler
         if log_queue_handler is not None and log_queue_handler.is_alive():
             return
@@ -582,11 +595,30 @@ class ProcessManager:
             State.process_registry.pop(self.config_name, None)
         return True
 
+    def _thread_preview_queue_handler(self, output, run_id):
+        """从子进程接收已编码截图并通知浏览器，不访问设备。"""
+        from module.runtime.preview import hub
+        while self.run_id == run_id:
+            try:
+                frame = output.get(timeout=0.5)
+                with self._get_lifecycle_lock(self.config_name):
+                    if frame.pop('runId', None) == self.run_id:
+                        hub.publish(self.config_name, frame)
+            except queue.Empty:
+                if not self.alive:
+                    return
+            except (EOFError, OSError):
+                return
+
     def _thread_log_queue_handler(self) -> None:
         while self.alive:
             try:
                 log = self._renderable_queue.get(timeout=1)
             except queue.Empty:
+                continue
+            if isinstance(log, dict) and "runtimeTask" in log:
+                if log.get("runId") == self.run_id:
+                    self.current_task = log["runtimeTask"]
                 continue
             self.renderables.append(log)
             if len(self.renderables) > self.renderables_max_length:
@@ -689,6 +721,8 @@ class ProcessManager:
         func: str,
         q: queue.Queue[ConsoleRenderable],
         e: threading.Event | None = None,
+        preview_queue=None,
+        run_id=None,
     ) -> None:
         import sys
 
@@ -722,6 +756,9 @@ class ProcessManager:
 
             logger.removeHandler(console_hdlr)
         set_func_logger(func=q.put)
+        if preview_queue is not None:
+            from module.runtime.preview import initialize
+            initialize(config_name, preview_queue, q.put, run_id)
 
         if os.environ.get("DEMO") == "1":
             logger.info("[WebUI-进程] 日志3")

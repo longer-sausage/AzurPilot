@@ -27,7 +27,7 @@ describe('前端模拟服务', () => {
     expect(dispatch('instances.list').map(item => item.name)).toEqual(['first'])
     expect(createMockState({empty: true}).dispatch('instances.list')).toEqual([])
   })
-  it('契约参数、只读字段、语言、日志游标和错误预览可验证', () => {
+  it('契约参数、只读字段、语言、日志游标和被动预览可验证', () => {
     const {dispatch, tick} = createMockState()
     expect(() => dispatch('schema.get', {language: '../deploy'})).toThrow(/契约/)
     expect(dispatch('schema.get', {language: 'en-US'}).translations.Emulator.Serial.name).toContain('Serial')
@@ -38,6 +38,9 @@ describe('前端模拟服务', () => {
     const before = dispatch('logs.get', {instance: 'demo-main'})
     tick()
     expect(dispatch('logs.get', {instance: 'demo-main', after: before.cursor}).entries).toHaveLength(1)
-    expect(() => dispatch('preview.capture', {instance: 'demo-error'})).toThrow(/模拟截图失败/)
+    expect(dispatch('preview.capture', {instance: 'demo-error'}).image).toBeNull()
+    const frame = dispatch('preview.capture', {instance: 'demo-main'})
+    expect(frame.image).toMatch(/^data:image/)
+    expect(dispatch('preview.capture', {instance: 'demo-main'})).toEqual(frame)
   })
 })

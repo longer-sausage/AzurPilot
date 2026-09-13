@@ -300,6 +300,87 @@
         "type": "object"
       }
     },
+    "statistics.refreshLoot": {
+      "mutates": true,
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "instance": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Instance",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instance"
+        ],
+        "title": "InstanceParams",
+        "type": "object"
+      }
+    },
+    "statistics.report": {
+      "mutates": false,
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "instance": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Instance",
+            "type": "string"
+          },
+          "category": {
+            "default": "resources",
+            "enum": [
+              "resources",
+              "action",
+              "opsi",
+              "commission",
+              "ships",
+              "loot"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "month": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Month"
+          },
+          "days": {
+            "default": 7,
+            "maximum": 365,
+            "minimum": 1,
+            "title": "Days",
+            "type": "integer"
+          },
+          "period": {
+            "default": "month",
+            "enum": [
+              "day",
+              "week",
+              "month"
+            ],
+            "title": "Period",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instance"
+        ],
+        "title": "StatisticsReportParams",
+        "type": "object"
+      }
+    },
     "statistics.resources": {
       "mutates": false,
       "params": {
@@ -326,7 +407,13 @@
               "Gem",
               "Cube",
               "Pt",
-              "ActionPoint"
+              "ActionPoint",
+              "Core",
+              "Medal",
+              "Merit",
+              "GuildCoin",
+              "YellowCoin",
+              "PurpleCoin"
             ],
             "title": "Resource",
             "type": "string"

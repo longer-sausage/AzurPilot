@@ -50,4 +50,18 @@ describe('WebSocket 客户端', () => {
     await expect(client.request('instances.list', {})).rejects.toMatchObject({code: 'DISCONNECTED'})
     expect(FakeSocket.latest.sent).toHaveLength(0)
   })
+  it('刷新后用已保存的密码登录，密码失效时清除旧值', async () => {
+    const values = new Map<string, string>()
+    Object.assign(window, {localStorage: {getItem: (key: string) => values.get(key), setItem: (key: string, value: string) => values.set(key, value), removeItem: (key: string) => values.delete(key)}})
+    const login = client.login('测试访问密码')
+    FakeSocket.latest.emit({v: 1, type: 'response', id: FakeSocket.latest.sent.at(-1)!.id, ok: true, result: {authenticated: true}})
+    await login
+    client.disconnect(); client = new ApiClient(); client.connect()
+    FakeSocket.latest.emit({v: 1, type: 'event', topic: 'session', seq: 1, data: {authRequired: true}})
+    expect(FakeSocket.latest.sent.at(-1)).toMatchObject({method: 'auth.login', params: {password: '测试访问密码'}})
+    FakeSocket.latest.emit({v: 1, type: 'response', id: FakeSocket.latest.sent.at(-1)!.id, ok: false, error: {code: 'UNAUTHORIZED', message: '密码已更换'}})
+    await vi.advanceTimersByTimeAsync(0)
+    expect(client.getSnapshot()).toBe('auth')
+    expect(values.size).toBe(0)
+  })
 })
