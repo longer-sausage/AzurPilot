@@ -321,10 +321,37 @@ class AccountApiTests(unittest.TestCase):
 
 
 class DeviceTests(unittest.TestCase):
+    def test_database_only_capture_and_restore_leave_preferences_untouched(self):
+        device = AccountDevice.__new__(AccountDevice)
+        device.stop = Mock()
+        device.resolve_base = Mock(return_value=BASES[1])
+        device.command = Mock(return_value=b'0')
+        blob = base64.b64decode(snapshot()[DATABASE])
+        device.read = Mock(return_value=blob)
+        files, users = device.capture()
+        self.assertEqual({DATABASE}, set(files))
+        self.assertTrue(users)
+        staged = {}
+        def command(script, data=None):
+            if data is not None:
+                staged[script.removeprefix('cat > ')] = data
+            elif script.startswith('cat '):
+                return staged[script.removeprefix('cat ')]
+            elif script.startswith('stat '):
+                return b'1000:1000'
+            return b''
+        device.command = Mock(side_effect=command)
+        device.restore(files)
+        scripts = '\n'.join(call.args[0] for call in device.command.call_args_list)
+        self.assertNotIn('shared_prefs', scripts)
+        self.assertIn('mv ', scripts)
+        self.assertIn(f'{BASES[1]}/{DATABASE}', scripts)
+        device.read.assert_called_with(DATABASE)
+
     def test_capture_only_account_files_and_player_keys(self):
         device = AccountDevice.__new__(AccountDevice)
         device.stop = Mock()
-        device.command = Mock(return_value=b'')
+        device.command = Mock(return_value=b'1')
         device.resolve_base = Mock(return_value=BASES[0])
         blobs = {name: base64.b64decode(value) for name, value in snapshot().items()}
         blobs[PLAYER_PREFS] = b'<map><string name="user.arg1">secret</string><int name="fps_limit" value="60"/></map>'
@@ -339,7 +366,7 @@ class DeviceTests(unittest.TestCase):
         device = AccountDevice.__new__(AccountDevice)
         for index, base in enumerate(BASES):
             with self.subTest(base=base):
-                device.command = Mock(return_value=str(index).encode())
+                device.command = Mock(return_value=b'11111111' if index == 0 else b'10111111')
                 device.base = device.resolve_base()
                 self.assertEqual(base, device.base)
                 probe = device.command.call_args.args[0]
@@ -349,10 +376,22 @@ class DeviceTests(unittest.TestCase):
                         self.assertIn(f'test -f {candidate}/{name}', probe)
                 device.read(DATABASE)
                 device.command.assert_called_with(f'cat {base}/{DATABASE}')
-        device.command = Mock(return_value=b'')
+        device.serial = '127.0.0.1:16384'
+        device.command = Mock(return_value=b'10111011')
         with self.assertRaises(ApiError) as error:
             device.resolve_base()
         self.assertEqual('ACCOUNT_DATA_NOT_FOUND', error.exception.code)
+        self.assertIn(DATABASE, error.exception.message)
+        self.assertIn(device.serial, error.exception.message)
+        device.command = Mock(return_value=b'11000000')
+        self.assertEqual(BASES[0], device.resolve_base())
+        device.command = Mock(return_value=b'00000000')
+        with self.assertRaisesRegex(ApiError, '目录不存在或不可访问'):
+            device.resolve_base()
+        device.command = Mock(return_value=b'unexpected-output')
+        with self.assertRaises(ApiError) as error:
+            device.resolve_base()
+        self.assertEqual('ACCOUNT_DEVICE_FAILED', error.exception.code)
 
     def test_restore_uses_selected_directory_for_entire_transaction(self):
         import xml.etree.ElementTree as ET
@@ -364,13 +403,15 @@ class DeviceTests(unittest.TestCase):
                 device = AccountDevice.__new__(AccountDevice)
                 device.stop = Mock()
                 device.resolve_base = Mock(return_value=base)
-                device.read = Mock(side_effect=[blobs[PLAYER_PREFS], blobs[DATABASE], blobs[SDK_PREFS], expected_player])
+                device.read = Mock(side_effect=[blobs[DATABASE], blobs[SDK_PREFS], expected_player])
                 staged = {}
                 def command(script, data=None):
                     if data is not None:
                         staged[script.removeprefix('cat > ')] = data
                     elif script.startswith('cat '):
                         return staged[script.removeprefix('cat ')]
+                    elif script.startswith('if test -f '):
+                        return blobs[PLAYER_PREFS]
                     elif script.startswith('stat '):
                         return b'1000:1000'
                     return b''

@@ -15,11 +15,11 @@
 
 ## 数据范围与设备一致性
 
-每次备份和恢复在游戏停止后重新检测应用私有目录，优先使用 `/data/user/0/com.bilibili.azurlane/`，缺少完整账号文件时尝试兼容路径 `/data/data/com.bilibili.azurlane/`。整次事务只使用一个检测成功的目录，数据库、偏好、边文件和回滚暂存均位于该目录；不会混用两个目录中的文件，也不会创建不存在的应用目录。快照只存相对文件名，因此旧快照无需迁移即可在两种路径下恢复。
+每次备份和恢复在游戏停止后重新检测应用私有目录，优先使用 `/data/user/0/com.bilibili.azurlane/`，缺少可读的 `databases/users.db` 时尝试兼容路径 `/data/data/com.bilibili.azurlane/`。整次事务只使用一个检测成功的目录，数据库、偏好、边文件和回滚暂存均位于该目录；不会混用两个目录中的文件，也不会创建不存在的应用目录。快照只存相对文件名，因此旧快照无需迁移即可在两种路径下恢复。
 
 已在授权模拟器检查数据库结构：`databases/users.db` 的 `users` 表包含登录凭据；Heart、track、Bugly 和 neuron 数据库是统计或错误上报数据，不作为账号快照。
 
-快照包含 `users.db`、SDK 的 `shared_prefs/com.bilibili.azurlane_preferences.xml`，以及 Unity 的 `shared_prefs/com.bilibili.azurlane.v2.playerprefs.xml` 中 `user.*`、`server.id*`、`loginedServer_*` 登录字段。Unity 其他游戏偏好在恢复时保留。快照可能包含 SDK 历史登录账号；列表展示的是快照内身份，切换单位是整份登录状态快照。
+快照必须包含 `users.db`；其余文件可选，设备存在且可读时采集 SDK 的 `shared_prefs/com.bilibili.azurlane_preferences.xml`，以及 Unity 的 `shared_prefs/com.bilibili.azurlane.v2.playerprefs.xml` 中 `user.*`、`server.id*`、`loginedServer_*` 登录字段。缺少任意偏好文件不阻止备份，只有 `users.db` 的快照也可以恢复；恢复仅操作快照包含的文件，不清理未包含的偏好。仅恢复数据库能否直接登录取决于客户端版本及当前 SDK 状态，未在另一台电脑上完成登录实测。Unity 其他游戏偏好在恢复时保留。快照可能包含 SDK 历史登录账号；列表展示的是快照内身份，切换单位是整份登录状态快照。
 
 采集前强制停止游戏并正向确认进程退出。遇到非空 SQLite WAL 或回滚日志拒绝采集，避免保存不完整事务。传输使用有超时的 ADB 标准输入/输出，不在主机创建明文数据库或 XML 文件。恢复在应用私有目录暂存和备份，保持应用 UID/GID、660 权限及 SELinux 上下文；恢复失败整组回滚。设备断连或回滚失败时，私有 `.azurpilot-account-*` 恢复目录可能被保留，需先人工确认原文件恢复状态再重试。游戏自动化 worker 与账号 API 共享父进程生命周期锁；启用账号管理时禁止同一模拟器同时运行多个受管理实例。独立启动的外部脚本不受 WebUI 进程登记管理，不应同时操作该模拟器。
 

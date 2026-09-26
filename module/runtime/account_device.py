@@ -34,15 +34,27 @@ class AccountDevice:
                 raise ApiError('ROOT_REQUIRED', '读取账号需要模拟器 root 权限，请启用 root 或 adb root')
 
     def resolve_base(self):
-        """仅在固定包名目录中寻找完整账号文件，优先使用 user 0 标准路径。"""
-        branches = []
-        for index, base in enumerate(BASES):
-            checks = ' && '.join(f'test -f {base}/{name}' for name in FILES)
-            branches.append(f"{'if' if index == 0 else 'elif'} {checks}; then printf {index}")
-        result = self.command('; '.join(branches) + '; fi').strip()
-        if result not in (b'0', b'1'):
-            raise ApiError('ACCOUNT_DATA_NOT_FOUND', '常见应用私有目录中未找到完整账号文件，请先在游戏中登录')
-        return BASES[int(result)]
+        """同时检查两种私有目录及可读文件，失败只报告路径，不输出账号内容。"""
+        checks = []
+        for base in BASES:
+            checks.append(f'test -d {base}')
+            checks.extend(f'test -f {base}/{name} && test -r {base}/{name}' for name in FILES)
+        script = '; '.join(f'if {check}; then printf 1; else printf 0; fi' for check in checks)
+        result = self.command(script).strip()
+        if not re.fullmatch(rb'[01]{8}', result):
+            raise ApiError('ACCOUNT_DEVICE_FAILED', '账号目录检测返回异常，请检查 ADB 和 root 权限')
+        states = [result[index * 4:(index + 1) * 4] for index in range(len(BASES))]
+        for base, state in zip(BASES, states):
+            if state[:2] == b'11':
+                return base
+        details = []
+        for base, state in zip(BASES, states):
+            if state[0:1] == b'0':
+                details.append(f'{base}：目录不存在或不可访问')
+            else:
+                missing = [DATABASE]
+                details.append(f'{base}：缺少或无法读取 ' + '、'.join(missing))
+        raise ApiError('ACCOUNT_DATA_NOT_FOUND', f'ADB {self.serial} 账号文件检测失败；' + '；'.join(details))
 
     def command(self, script, data=None):
         if data is not None:
@@ -96,12 +108,18 @@ class AccountDevice:
         # 非空 WAL/回滚日志可能含未合并事务，不能当作完整快照。
         for suffix in ('-wal', '-journal'):
             self.command(f'test ! -s {self.base}/{DATABASE}{suffix}')
-        blobs = {name: self.read(name) for name in FILES}
+        blobs = {DATABASE: self.read(DATABASE)}
+        for name in (SDK_PREFS, PLAYER_PREFS):
+            if self.command(f'if test -f {self.base}/{name} && test -r {self.base}/{name}; then printf 1; else printf 0; fi').strip() == b'1':
+                blobs[name] = self.read(name)
         users = self.users(blobs[DATABASE])
         if not users:
             raise ApiError('ACCOUNT_EMPTY', '未发现已保存的登录账号')
         try:
-            ET.fromstring(blobs[SDK_PREFS])
+            if SDK_PREFS in blobs:
+                ET.fromstring(blobs[SDK_PREFS])
+            if PLAYER_PREFS not in blobs:
+                return {name: base64.b64encode(blob).decode('ascii') for name, blob in blobs.items()}, users
             player = ET.fromstring(blobs[PLAYER_PREFS])
             selected = ET.Element('map')
             for element in player:
@@ -113,28 +131,32 @@ class AccountDevice:
         return {name: base64.b64encode(blob).decode('ascii') for name, blob in blobs.items()}, users
 
     def restore(self, files):
-        if set(files) != set(FILES):
+        if DATABASE not in files or not set(files) <= set(FILES):
             raise ApiError('ACCOUNT_SCHEMA_CHANGED', '账号快照文件不兼容')
         try:
-            blobs = {name: base64.b64decode(files[name], validate=True) for name in FILES}
+            blobs = {name: base64.b64decode(files[name], validate=True) for name in files}
             self.users(blobs[DATABASE])
-            saved = ET.fromstring(blobs[PLAYER_PREFS])
-            ET.fromstring(blobs[SDK_PREFS])
-            if any(not account_key(e.get('name', '')) for e in saved):
+            saved = ET.fromstring(blobs[PLAYER_PREFS]) if PLAYER_PREFS in blobs else None
+            if SDK_PREFS in blobs:
+                ET.fromstring(blobs[SDK_PREFS])
+            if saved is not None and any(not account_key(e.get('name', '')) for e in saved):
                 raise ValueError()
         except (ValueError, ET.ParseError):
             raise ApiError('ACCOUNT_SCHEMA_CHANGED', '账号快照损坏') from None
         self.stop()
         self.base = self.resolve_base()
-        try:
-            player = ET.fromstring(self.read(PLAYER_PREFS))
-        except ET.ParseError:
-            raise ApiError('ACCOUNT_SCHEMA_CHANGED', '设备偏好文件损坏') from None
-        for element in list(player):
-            if account_key(element.get('name', '')):
-                player.remove(element)
-        player.extend(saved)
-        blobs[PLAYER_PREFS] = ET.tostring(player, encoding='utf-8', xml_declaration=True)
+        if saved is not None:
+            try:
+                current = self.command(f'if test -f {self.base}/{PLAYER_PREFS}; then cat {self.base}/{PLAYER_PREFS}; else printf "<map/>"; fi')
+                player = ET.fromstring(current)
+            except ET.ParseError:
+                raise ApiError('ACCOUNT_SCHEMA_CHANGED', '设备偏好文件损坏') from None
+            for element in list(player):
+                if account_key(element.get('name', '')):
+                    player.remove(element)
+            player.extend(saved)
+            blobs[PLAYER_PREFS] = ET.tostring(player, encoding='utf-8', xml_declaration=True)
+        names = tuple(blobs)
         owner = self.command(f'stat -c %u:%g {self.base}/{DATABASE}').strip().decode('ascii')
         if not re.fullmatch(r'\d+:\d+', owner):
             raise ApiError('ACCOUNT_DEVICE_FAILED', '无法确认账号文件所有者')
@@ -142,26 +164,27 @@ class AccountDevice:
         self.command(f'umask 077; mkdir {stage}')
         cleanup = True
         try:
-            for index, name in enumerate(FILES):
+            for index, name in enumerate(names):
                 self.command(f'cat > {stage}/new{index}', blobs[name])
                 if self.command(f'cat {stage}/new{index}') != blobs[name]:
                     raise ApiError('ACCOUNT_DEVICE_FAILED', '设备写入校验失败')
             # 在设备私有目录备份所有目标及 SQLite 边文件；失败则整组回滚。
-            targets = (*FILES, DATABASE + '-wal', DATABASE + '-shm', DATABASE + '-journal',
-                       SDK_PREFS + '.bak', PLAYER_PREFS + '.bak')
+            targets = (*names, DATABASE + '-wal', DATABASE + '-shm', DATABASE + '-journal',
+                       *(name + '.bak' for name in names if name.startswith('shared_prefs/')))
             backup = '\n'.join(f'if test -e {self.base}/{name}; then cp -p {self.base}/{name} {stage}/old{i}; fi'
                                for i, name in enumerate(targets))
             apply = ' &&\n'.join(f'chown {owner} {stage}/new{i} && chmod 660 {stage}/new{i} && mv {stage}/new{i} {self.base}/{name}'
-                              for i, name in enumerate(FILES))
-            remove = ' &&\n'.join(f'rm -f {self.base}/{name}' for name in targets[len(FILES):])
+                              for i, name in enumerate(names))
+            remove = ' &&\n'.join(f'rm -f {self.base}/{name}' for name in targets[len(names):])
             rollback = ' &&\n'.join(f'if test -e {stage}/old{i}; then cp -p {stage}/old{i} {self.base}/{name}; else rm -f {self.base}/{name}; fi'
                                  for i, name in enumerate(targets))
             self.command(f'set -e\n{backup}')
             # 回滚失败时保留设备私有恢复目录，不能销毁最后一份原数据。
             cleanup = False
-            self.command(f'({apply} &&\n{remove} &&\nrestorecon {self.base}/databases/users.db {self.base}/shared_prefs/*.xml) || {{ ({rollback}) && rm -rf {stage}; exit 1; }}')
+            contexts = ' '.join(f'{self.base}/{name}' for name in names)
+            self.command(f'({apply} &&\n{remove} &&\nrestorecon {contexts}) || {{ ({rollback}) && rm -rf {stage}; exit 1; }}')
             cleanup = True
-            for name in FILES:
+            for name in names:
                 if self.read(name) != blobs[name]:
                     cleanup = False
                     self.command(f'({rollback}) && rm -rf {stage}')
