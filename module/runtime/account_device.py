@@ -29,9 +29,16 @@ class AccountDevice:
         self.serial, self.adb = serial, str(adb)
         self.use_su = False
         if self.command('id -u').strip() != b'0':
-            self.use_su = True
-            if self.command('id -u').strip() != b'0':
-                raise ApiError('ROOT_REQUIRED', '读取账号需要模拟器 root 权限，请启用 root 或 adb root')
+            # 只用无副作用的 UID 查询协商 su 形式，不对恢复写入做失败重试。
+            for mode in ('command', 'uid', 'root'):
+                self.use_su = mode
+                try:
+                    if self.command('id -u').strip() == b'0':
+                        break
+                except ApiError:
+                    continue
+            else:
+                raise ApiError('ROOT_REQUIRED', 'ADB 已连接，但无法取得 root；已检查 su -c、su 0 和 su root，请启用模拟器 root 权限')
 
     def resolve_base(self):
         """同时检查两种私有目录及可读文件，失败只报告路径，不输出账号内容。"""
@@ -57,26 +64,42 @@ class AccountDevice:
         raise ApiError('ACCOUNT_DATA_NOT_FOUND', f'ADB {self.serial} 账号文件检测失败；' + '；'.join(details))
 
     def command(self, script, data=None):
+        writing = data is not None
         if data is not None:
             # Windows adb 的 stdin 会把二进制 Ctrl-Z 当作 EOF；仅通过管道传输 Base64。
             script = f'base64 -d | ({script})'
             data = base64.b64encode(data) + b'\n'
         # shell v2 传递远端退出码；exec-out 会吞掉退出码，不能用于恢复事务。
         # 输出也使用 Base64，避免 Windows 标准流改写二进制换行或 Ctrl-Z。
-        script = f'set -o pipefail; ({script}) | base64'
-        command = ['su', '-c', shlex.quote(script)] if self.use_su else ['sh', '-c', shlex.quote(script)]
+        script = f'set -o pipefail; (\n{script}\n) | base64'
+        if not writing:
+            # MuMu Android 12 的 su 拒绝约 4 KiB 以上的命令参数。
+            # 将脚本通过标准输入传给 sh，完整保留事务、退出码和输出编码。
+            data = base64.b64encode(script.encode('utf-8')) + b'\n'
+            script = 'set -o pipefail; base64 -d | sh'
+        if self.use_su in ('uid', 'root'):
+            command = ['su', '0' if self.use_su == 'uid' else 'root', 'sh', '-c', shlex.quote(script)]
+        else:
+            command = ['su', '-c', shlex.quote(script)] if self.use_su else ['sh', '-c', shlex.quote(script)]
+        stage = '传输写入' if writing else '执行设备命令'
         try:
             result = subprocess.run([self.adb, '-s', self.serial, 'shell', '-T', ' '.join(command)],
                                     input=data, capture_output=True, timeout=30)
-            if result.returncode != 0 or len(result.stdout) > 6 * 1024 * 1024:
+            if result.returncode != 0:
+                raise ApiError('ACCOUNT_DEVICE_FAILED', f'ADB {stage}失败（退出码 {result.returncode}），请检查 root、shell 工具和文件权限')
+            if len(result.stdout) > 6 * 1024 * 1024:
                 raise ValueError()
             output = base64.b64decode(b''.join(result.stdout.split()), validate=True)
             if len(output) > 4 * 1024 * 1024:
                 raise ValueError()
             return output
+        except subprocess.TimeoutExpired:
+            raise ApiError('ACCOUNT_DEVICE_FAILED', f'ADB {stage}超时，请检查模拟器连接或 root 授权') from None
+        except FileNotFoundError:
+            raise ApiError('ACCOUNT_DEVICE_FAILED', '找不到配置的 ADB 程序，请检查 AdbExecutable') from None
         except (OSError, subprocess.SubprocessError, ValueError):
             # 不转发 stderr、命令内容或带账号数据的底层异常。
-            raise ApiError('ACCOUNT_DEVICE_FAILED', '账号设备操作失败，请检查 ADB、root 权限和游戏文件') from None
+            raise ApiError('ACCOUNT_DEVICE_FAILED', f'ADB {stage}或 Base64 传输校验失败，请检查 ADB、root 和 shell 工具') from None
 
     def stop(self):
         self.command(f'am force-stop {PACKAGE}')
@@ -107,7 +130,8 @@ class AccountDevice:
         self.base = self.resolve_base()
         # 非空 WAL/回滚日志可能含未合并事务，不能当作完整快照。
         for suffix in ('-wal', '-journal'):
-            self.command(f'test ! -s {self.base}/{DATABASE}{suffix}')
+            if self.command(f'if test -s {self.base}/{DATABASE}{suffix}; then printf 1; else printf 0; fi').strip() != b'0':
+                raise ApiError('ACCOUNT_DATABASE_BUSY', f'users.db{suffix} 非空，账号事务尚未合并，已拒绝不完整备份；请正常退出游戏后重试')
         blobs = {DATABASE: self.read(DATABASE)}
         for name in (SDK_PREFS, PLAYER_PREFS):
             if self.command(f'if test -f {self.base}/{name} && test -r {self.base}/{name}; then printf 1; else printf 0; fi').strip() == b'1':

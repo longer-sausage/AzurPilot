@@ -351,7 +351,7 @@ class DeviceTests(unittest.TestCase):
     def test_capture_only_account_files_and_player_keys(self):
         device = AccountDevice.__new__(AccountDevice)
         device.stop = Mock()
-        device.command = Mock(return_value=b'1')
+        device.command = Mock(side_effect=lambda script: b'0' if script.startswith('if test -s ') else b'1')
         device.resolve_base = Mock(return_value=BASES[0])
         blobs = {name: base64.b64decode(value) for name, value in snapshot().items()}
         blobs[PLAYER_PREFS] = b'<map><string name="user.arg1">secret</string><int name="fps_limit" value="60"/></map>'
@@ -432,6 +432,42 @@ class DeviceTests(unittest.TestCase):
                 AccountDevice('127.0.0.1:16384', 'adb')
         self.assertNotIn('secret-account', str(error.exception))
 
+    def test_su_command_and_uid_variants_are_negotiated_only_by_readonly_probe(self):
+        for successful_mode in ('command', 'uid', 'root'):
+            with self.subTest(mode=successful_mode):
+                def run(args, **kwargs):
+                    command = args[-1]
+                    if command.startswith('sh -c '):
+                        uid = b'2000'
+                    elif ((successful_mode == 'command' and command.startswith('su -c '))
+                          or (successful_mode == 'uid' and command.startswith('su 0 sh -c '))
+                          or (successful_mode == 'root' and command.startswith('su root sh -c '))):
+                        uid = b'0'
+                    else:
+                        return SimpleNamespace(returncode=1, stdout=b'', stderr=b'synthetic-sensitive-error')
+                    return SimpleNamespace(returncode=0, stdout=base64.b64encode(uid), stderr=b'')
+                with patch('module.runtime.account_device.subprocess.run', side_effect=run) as execute:
+                    device = AccountDevice('127.0.0.1:16384', 'adb')
+                    self.assertEqual(successful_mode, device.use_su)
+                    self.assertTrue(all(b'id -u' in base64.b64decode(call.kwargs['input']) for call in execute.call_args_list))
+                    execute.reset_mock()
+                    execute.side_effect = None
+                    execute.return_value = SimpleNamespace(returncode=1, stdout=b'', stderr=b'synthetic-sensitive-error')
+                    with self.assertRaises(ApiError):
+                        device.command('cat > /synthetic/file', b'synthetic-secret')
+                    execute.assert_called_once()
+
+    def test_nonempty_account_journal_reports_busy_instead_of_adb_failure(self):
+        device = AccountDevice.__new__(AccountDevice)
+        device.stop = Mock()
+        device.resolve_base = Mock(return_value=BASES[0])
+        device.command = Mock(return_value=b'1')
+        device.read = Mock()
+        with self.assertRaises(ApiError) as error:
+            device.capture()
+        self.assertEqual('ACCOUNT_DATABASE_BUSY', error.exception.code)
+        device.read.assert_not_called()
+
     def test_transport_preserves_binary_and_remote_exit_code(self):
         blob = bytes(range(256))
         device = AccountDevice.__new__(AccountDevice)
@@ -448,6 +484,16 @@ class DeviceTests(unittest.TestCase):
                 device.command('false')
             self.assertEqual('ACCOUNT_DEVICE_FAILED', error.exception.code)
             self.assertNotIn('synthetic-secret-token', str(error.exception))
+
+    def test_long_shell_script_is_sent_via_stdin_instead_of_su_argument(self):
+        device = AccountDevice.__new__(AccountDevice)
+        device.adb, device.serial, device.use_su = 'adb', '127.0.0.1:16416', 'command'
+        script = 'true #' + 'x' * 7000
+        with patch('module.runtime.account_device.subprocess.run', return_value=SimpleNamespace(returncode=0, stdout=b'', stderr=b'')) as execute:
+            device.command(script)
+        args, kwargs = execute.call_args
+        self.assertLess(len(args[0][-1]), 200)
+        self.assertIn(script.encode(), base64.b64decode(kwargs['input']))
 
 
 if __name__ == '__main__':
