@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch
 from module.api.account_service import AccountService
 from module.api.config_service import ConfigService
 from module.api.protocol import AccountParams, ApiError, InstanceParams
-from module.runtime.account_device import AccountDevice, DATABASE, FILES, PLAYER_PREFS, SDK_PREFS
+from module.runtime.account_device import AccountDevice, BASES, DATABASE, FILES, PLAYER_PREFS, SDK_PREFS
 from module.runtime.account_vault import AccountVault, SecretKey, sensitive_operation
 from tests.test_api import fixture
 
@@ -325,6 +325,7 @@ class DeviceTests(unittest.TestCase):
         device = AccountDevice.__new__(AccountDevice)
         device.stop = Mock()
         device.command = Mock(return_value=b'')
+        device.resolve_base = Mock(return_value=BASES[0])
         blobs = {name: base64.b64decode(value) for name, value in snapshot().items()}
         blobs[PLAYER_PREFS] = b'<map><string name="user.arg1">secret</string><int name="fps_limit" value="60"/></map>'
         device.read = Mock(side_effect=lambda name: blobs[name])
@@ -333,6 +334,56 @@ class DeviceTests(unittest.TestCase):
         self.assertNotIn(b'fps_limit', base64.b64decode(files[PLAYER_PREFS]))
         self.assertEqual('synthetic-uid', users[0]['uid'])
         device.stop.assert_called_once()
+
+    def test_common_private_directories_and_missing_files(self):
+        device = AccountDevice.__new__(AccountDevice)
+        for index, base in enumerate(BASES):
+            with self.subTest(base=base):
+                device.command = Mock(return_value=str(index).encode())
+                device.base = device.resolve_base()
+                self.assertEqual(base, device.base)
+                probe = device.command.call_args.args[0]
+                self.assertLess(probe.index(BASES[0]), probe.index(BASES[1]))
+                for candidate in BASES:
+                    for name in FILES:
+                        self.assertIn(f'test -f {candidate}/{name}', probe)
+                device.read(DATABASE)
+                device.command.assert_called_with(f'cat {base}/{DATABASE}')
+        device.command = Mock(return_value=b'')
+        with self.assertRaises(ApiError) as error:
+            device.resolve_base()
+        self.assertEqual('ACCOUNT_DATA_NOT_FOUND', error.exception.code)
+
+    def test_restore_uses_selected_directory_for_entire_transaction(self):
+        import xml.etree.ElementTree as ET
+        files = snapshot()
+        blobs = {name: base64.b64decode(value) for name, value in files.items()}
+        expected_player = ET.tostring(ET.fromstring(blobs[PLAYER_PREFS]), encoding='utf-8', xml_declaration=True)
+        for base in BASES:
+            with self.subTest(base=base):
+                device = AccountDevice.__new__(AccountDevice)
+                device.stop = Mock()
+                device.resolve_base = Mock(return_value=base)
+                device.read = Mock(side_effect=[blobs[PLAYER_PREFS], blobs[DATABASE], blobs[SDK_PREFS], expected_player])
+                staged = {}
+                def command(script, data=None):
+                    if data is not None:
+                        staged[script.removeprefix('cat > ')] = data
+                    elif script.startswith('cat '):
+                        return staged[script.removeprefix('cat ')]
+                    elif script.startswith('stat '):
+                        return b'1000:1000'
+                    return b''
+                device.command = Mock(side_effect=command)
+                device.restore(files)
+                scripts = '\n'.join(call.args[0] for call in device.command.call_args_list)
+                other_base = next(candidate for candidate in BASES if candidate != base)
+                self.assertNotIn(other_base, scripts)
+                self.assertIn('mv ', scripts)
+                self.assertIn(f'{base}/{DATABASE}', scripts)
+                self.assertIn(f'restorecon {base}/databases/users.db', scripts)
+                self.assertIn(f'rm -f {base}/{DATABASE}-wal', scripts)
+                device.stop.assert_called_once()
 
     def test_root_and_transport_errors_never_echo_secret(self):
         with patch('module.runtime.account_device.subprocess.run', return_value=SimpleNamespace(returncode=1, stdout=b'', stderr=b'secret-account')):

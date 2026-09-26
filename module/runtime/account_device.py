@@ -11,7 +11,7 @@ from contextlib import closing
 from module.api.protocol import ApiError
 
 PACKAGE = 'com.bilibili.azurlane'
-BASE = f'/data/data/{PACKAGE}'
+BASES = (f'/data/user/0/{PACKAGE}', f'/data/data/{PACKAGE}')
 DATABASE = 'databases/users.db'
 SDK_PREFS = 'shared_prefs/com.bilibili.azurlane_preferences.xml'
 PLAYER_PREFS = 'shared_prefs/com.bilibili.azurlane.v2.playerprefs.xml'
@@ -32,6 +32,17 @@ class AccountDevice:
             self.use_su = True
             if self.command('id -u').strip() != b'0':
                 raise ApiError('ROOT_REQUIRED', '读取账号需要模拟器 root 权限，请启用 root 或 adb root')
+
+    def resolve_base(self):
+        """仅在固定包名目录中寻找完整账号文件，优先使用 user 0 标准路径。"""
+        branches = []
+        for index, base in enumerate(BASES):
+            checks = ' && '.join(f'test -f {base}/{name}' for name in FILES)
+            branches.append(f"{'if' if index == 0 else 'elif'} {checks}; then printf {index}")
+        result = self.command('; '.join(branches) + '; fi').strip()
+        if result not in (b'0', b'1'):
+            raise ApiError('ACCOUNT_DATA_NOT_FOUND', '常见应用私有目录中未找到完整账号文件，请先在游戏中登录')
+        return BASES[int(result)]
 
     def command(self, script, data=None):
         if data is not None:
@@ -61,7 +72,7 @@ class AccountDevice:
             raise ApiError('GAME_RUNNING', '未确认游戏停止，已拒绝访问账号文件')
 
     def read(self, name):
-        return self.command(f'cat {BASE}/{name}')
+        return self.command(f'cat {self.base}/{name}')
 
     @staticmethod
     def users(blob):
@@ -81,9 +92,10 @@ class AccountDevice:
 
     def capture(self):
         self.stop()
+        self.base = self.resolve_base()
         # 非空 WAL/回滚日志可能含未合并事务，不能当作完整快照。
         for suffix in ('-wal', '-journal'):
-            self.command(f'test ! -s {BASE}/{DATABASE}{suffix}')
+            self.command(f'test ! -s {self.base}/{DATABASE}{suffix}')
         blobs = {name: self.read(name) for name in FILES}
         users = self.users(blobs[DATABASE])
         if not users:
@@ -113,6 +125,7 @@ class AccountDevice:
         except (ValueError, ET.ParseError):
             raise ApiError('ACCOUNT_SCHEMA_CHANGED', '账号快照损坏') from None
         self.stop()
+        self.base = self.resolve_base()
         try:
             player = ET.fromstring(self.read(PLAYER_PREFS))
         except ET.ParseError:
@@ -122,10 +135,10 @@ class AccountDevice:
                 player.remove(element)
         player.extend(saved)
         blobs[PLAYER_PREFS] = ET.tostring(player, encoding='utf-8', xml_declaration=True)
-        owner = self.command(f'stat -c %u:%g {BASE}/{DATABASE}').strip().decode('ascii')
+        owner = self.command(f'stat -c %u:%g {self.base}/{DATABASE}').strip().decode('ascii')
         if not re.fullmatch(r'\d+:\d+', owner):
             raise ApiError('ACCOUNT_DEVICE_FAILED', '无法确认账号文件所有者')
-        stage = f'{BASE}/.azurpilot-account-{uuid.uuid4().hex}'
+        stage = f'{self.base}/.azurpilot-account-{uuid.uuid4().hex}'
         self.command(f'umask 077; mkdir {stage}')
         cleanup = True
         try:
@@ -136,17 +149,17 @@ class AccountDevice:
             # 在设备私有目录备份所有目标及 SQLite 边文件；失败则整组回滚。
             targets = (*FILES, DATABASE + '-wal', DATABASE + '-shm', DATABASE + '-journal',
                        SDK_PREFS + '.bak', PLAYER_PREFS + '.bak')
-            backup = '\n'.join(f'if test -e {BASE}/{name}; then cp -p {BASE}/{name} {stage}/old{i}; fi'
+            backup = '\n'.join(f'if test -e {self.base}/{name}; then cp -p {self.base}/{name} {stage}/old{i}; fi'
                                for i, name in enumerate(targets))
-            apply = ' &&\n'.join(f'chown {owner} {stage}/new{i} && chmod 660 {stage}/new{i} && mv {stage}/new{i} {BASE}/{name}'
+            apply = ' &&\n'.join(f'chown {owner} {stage}/new{i} && chmod 660 {stage}/new{i} && mv {stage}/new{i} {self.base}/{name}'
                               for i, name in enumerate(FILES))
-            remove = ' &&\n'.join(f'rm -f {BASE}/{name}' for name in targets[len(FILES):])
-            rollback = ' &&\n'.join(f'if test -e {stage}/old{i}; then cp -p {stage}/old{i} {BASE}/{name}; else rm -f {BASE}/{name}; fi'
+            remove = ' &&\n'.join(f'rm -f {self.base}/{name}' for name in targets[len(FILES):])
+            rollback = ' &&\n'.join(f'if test -e {stage}/old{i}; then cp -p {stage}/old{i} {self.base}/{name}; else rm -f {self.base}/{name}; fi'
                                  for i, name in enumerate(targets))
             self.command(f'set -e\n{backup}')
             # 回滚失败时保留设备私有恢复目录，不能销毁最后一份原数据。
             cleanup = False
-            self.command(f'({apply} &&\n{remove} &&\nrestorecon {BASE}/databases/users.db {BASE}/shared_prefs/*.xml) || {{ ({rollback}) && rm -rf {stage}; exit 1; }}')
+            self.command(f'({apply} &&\n{remove} &&\nrestorecon {self.base}/databases/users.db {self.base}/shared_prefs/*.xml) || {{ ({rollback}) && rm -rf {stage}; exit 1; }}')
             cleanup = True
             for name in FILES:
                 if self.read(name) != blobs[name]:

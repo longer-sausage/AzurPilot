@@ -15,6 +15,8 @@
 
 ## 数据范围与设备一致性
 
+每次备份和恢复在游戏停止后重新检测应用私有目录，优先使用 `/data/user/0/com.bilibili.azurlane/`，缺少完整账号文件时尝试兼容路径 `/data/data/com.bilibili.azurlane/`。整次事务只使用一个检测成功的目录，数据库、偏好、边文件和回滚暂存均位于该目录；不会混用两个目录中的文件，也不会创建不存在的应用目录。快照只存相对文件名，因此旧快照无需迁移即可在两种路径下恢复。
+
 已在授权模拟器检查数据库结构：`databases/users.db` 的 `users` 表包含登录凭据；Heart、track、Bugly 和 neuron 数据库是统计或错误上报数据，不作为账号快照。
 
 快照包含 `users.db`、SDK 的 `shared_prefs/com.bilibili.azurlane_preferences.xml`，以及 Unity 的 `shared_prefs/com.bilibili.azurlane.v2.playerprefs.xml` 中 `user.*`、`server.id*`、`loginedServer_*` 登录字段。Unity 其他游戏偏好在恢复时保留。快照可能包含 SDK 历史登录账号；列表展示的是快照内身份，切换单位是整份登录状态快照。
