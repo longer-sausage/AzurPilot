@@ -79,6 +79,8 @@ export interface Announcement {
   url?: string
 }
 export interface Results {
+  'accounts.status': AccountStatus
+  'accounts.manage': AccountStatus
   'announcement.get': Announcement | null
   'updater.status': UpdateStatus
   'updater.commits': CommitHistory
@@ -112,4 +114,10 @@ export interface Results {
   'settings.patch': {updated: string[]}
   'startup.get': {enabled: boolean; remember: boolean}
   'startup.set': {enabled: boolean; remember: boolean}
+}
+
+export interface AccountStatus {
+  initialized: boolean; enabled: boolean; unlocked: boolean; tpm_bound: boolean
+  profiles?: Array<{id: string; label: string; users: Array<{uid: string; name: string}>}>
+  selected?: string | null
 }
