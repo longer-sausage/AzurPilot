@@ -30,8 +30,14 @@ def main():
         # 浏览器验收可测试密码流程，但不能写入真实模拟器或建立主机 TPM 密钥。
         account_method = app.state.gateway.router.methods['accounts.manage']
         def manage_test_account(params):
-            if params.action in ('capture', 'select', 'bind_tpm'):
+            if params.action in ('capture', 'select'):
                 return reject_execution()
+            if params.action == 'bind_tpm':
+                from unittest.mock import patch
+                from module.api.protocol import ApiError
+                with patch('module.runtime.account_tpm.TpmProtector.wrap',
+                           side_effect=ApiError('TPM_UNAVAILABLE', '模拟 TPM 验证失败')):
+                    return account_method.handler(params)
             return account_method.handler(params)
         from module.api.router import Method
         app.state.gateway.router.methods['accounts.manage'] = Method(account_method.params, manage_test_account, True)

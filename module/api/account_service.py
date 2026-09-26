@@ -44,7 +44,7 @@ class AccountService:
         with ProcessManager._get_lifecycle_lock(instance), OPERATIONS:
             if action == 'lock':
                 ensure_idle(self.configs, instance)
-                self.vault.keys.pop(instance, None)
+                self.vault.forget(instance)
                 return self.vault.status(instance)
             if action in ('create', 'password'):
                 password = params.password if action == 'create' else params.new_password
@@ -52,6 +52,7 @@ class AccountService:
                 if web_password and secrets.compare_digest(password.encode(), web_password.encode()):
                     raise ApiError('PASSWORD_REUSED', '实例密码必须与 WebUI 密码不同')
             if action == 'create':
+                ensure_idle(self.configs, instance)
                 self.vault.create(instance, params.password)
                 return self.vault.status(instance)
             row, key, data = self.vault.authenticate(instance, params.password)
@@ -91,19 +92,31 @@ class AccountService:
                 row = (salt,)
                 if machine:
                     from module.runtime.account_tpm import TpmProtector
-                    machine = TpmProtector(self.vault.root, instance).wrap(key.value)
+                    try:
+                        machine = TpmProtector(self.vault.root, instance).wrap(key.value)
+                    except Exception:
+                        key.clear()
+                        self.vault.invalidate_tpm(instance)
             elif action == 'bind_tpm':
                 from module.runtime.account_tpm import TpmProtector
                 protector = TpmProtector(self.vault.root, instance)
-                machine = protector.wrap(key.value)
-                if not secrets.compare_digest(protector.unwrap(machine), key.value):
-                    raise ApiError('TPM_UNAVAILABLE', 'TPM 绑定校验失败')
+                failed = False
+                try:
+                    machine = protector.wrap(key.value)
+                    failed = not secrets.compare_digest(protector.unwrap(machine), key.value)
+                except Exception:
+                    failed = True
+                if failed:
+                    key.clear()
+                    self.vault.invalidate_tpm(instance)
             elif action == 'unbind_tpm':
                 machine = None
             if action not in ('list', 'unlock', 'select'):
                 self.vault.save(instance, row[0], key, data, enabled, machine)
             self.vault.keys[instance] = key
             result = self.vault.status(instance)
+            if result['destroyed']:
+                raise ApiError('VAULT_DESTROYED', 'TPM 验证失败，盐和数据库已销毁，账号信息不再返回')
             # 只有显式查看列表返回账号身份；不会返回 token、密码或数据库内容。
             if action == 'list':
                 result.update(profiles=[{k: p[k] for k in ('id', 'label', 'users')} for p in data['profiles']],
@@ -115,7 +128,7 @@ class AccountService:
 def prepare_worker(instance):
     """父进程启动前检查解锁与同设备冲突；与账号操作共享锁。"""
     from module.api.config_service import ConfigService
-    if not any((vault.root / 'config').glob('*/config.db')):
+    if not any((vault.root / 'config').glob('*/config.db')) and not any((vault.root / 'config').glob('*/account.destroyed')):
         return None
     configs = ConfigService()
     key = vault.startup_key(instance)

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { api } from '../api/client'
+import { ApiError, api } from '../api/client'
 import type { Parameters } from '../api/generated'
 import type { AccountStatus } from '../api/types'
 import { useApp, useConnection } from '../app/context'
@@ -48,7 +48,15 @@ export function AccountPanel({instance}: {instance: string}) {
     try {
       const result = await api.request('accounts.manage', params)
       if (epoch.current === current) { setStatus(result); setChanging(false); if (action !== 'list') notify(text.done) }
-    } catch (error) { if (epoch.current === current) setError((error as Error).message) }
+    } catch (error) {
+      if (epoch.current === current) {
+        setError((error as Error).message)
+        if (error instanceof ApiError && error.code === 'VAULT_DESTROYED') {
+          const result = await api.request('accounts.status', {instance}).catch(() => undefined)
+          if (result && epoch.current === current) setStatus(result)
+        }
+      }
+    }
     finally { if (epoch.current === current) setBusy(false) }
   }
   const disabled = busy || connection !== 'ready' || !status
@@ -56,6 +64,7 @@ export function AccountPanel({instance}: {instance: string}) {
     <div className="panel-heading"><div><span className="group-indicator"/><h2>{text.title}</h2></div></div>
     <div className="field-row"><div className="field-label"><p>{text.help}</p><p>{text.security}</p></div></div>
     {error && <p className="field-row" role="alert">{error}</p>}
+    {status?.destroyed && <p className="field-row" role="alert">{text.destroyed}</p>}
     {status && <>
       {status.initialized && <div className="field-row"><span>{status.unlocked ? text.unlocked : text.locked} · {status.tpm_bound ? text.bound : text.unbound}</span></div>}
       <div className="field-row"><label className="field-label" htmlFor="account-password"><span className="field-name">{text.password}</span></label>

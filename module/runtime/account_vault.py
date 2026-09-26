@@ -21,7 +21,10 @@ _KEEP_MACHINE = object()
 class SecretKey:
     """跨进程传递密钥时避免调试器和富文本异常日志输出密钥。"""
     def __init__(self, value):
-        self.value = value
+        self.value = bytearray(value)
+
+    def clear(self):
+        self.value[:] = b'\0' * len(self.value)
 
     def __repr__(self):
         return '<实例密钥已隐藏>'
@@ -52,6 +55,7 @@ class AccountVault:
         self.root = Path(root)
         self.keys = {}
         self.failures = {}
+        self.revoked = set()
 
     def path(self, instance):
         instance = validate_name(instance)
@@ -61,7 +65,90 @@ class AccountVault:
             raise ApiError('INVALID_PARAMS', '账号保险库路径无效')
         return path
 
+    def marker(self, instance):
+        return self.path(instance).with_name('account.destroyed')
+
+    def forget(self, instance):
+        key = self.keys.pop(instance, None)
+        if key is not None:
+            key.clear()
+        self.failures.pop(instance, None)
+
+    @staticmethod
+    def wipe_file(path):
+        if path.is_symlink():
+            path.unlink()
+            return
+        if not path.exists():
+            return
+        with path.open('r+b', buffering=0) as file:
+            remaining = os.fstat(file.fileno()).st_size
+            zeros = bytes(64 * 1024)
+            while remaining:
+                written = file.write(zeros[:min(remaining, len(zeros))])
+                if not written:
+                    raise OSError('保险库覆写失败')
+                remaining -= written
+            os.fsync(file.fileno())
+            file.truncate(0)
+            os.fsync(file.fileno())
+        path.unlink()
+
+    def destroy(self, instance):
+        """先持久化禁用标记，再覆写并删除盐、密文与 SQLite 边文件。"""
+        self.revoked.add(validate_name(instance))
+        self.forget(instance)
+        path = self.path(instance)
+        marker = self.marker(instance)
+        failed = False
+        try:
+            if marker.is_symlink():
+                raise OSError('销毁标记路径无效')
+            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            with marker.open('wb') as file:
+                file.write(b'account vault destroyed\n')
+                file.flush()
+                os.fsync(file.fileno())
+        except OSError:
+            failed = True
+        for suffix in ('', '-journal', '-wal', '-shm'):
+            try:
+                self.wipe_file(path.with_name(path.name + suffix))
+            except OSError:
+                failed = True
+        if failed:
+            raise ApiError('VAULT_DESTROY_FAILED', '保险库已禁止使用，但部分文件未能销毁；请检查文件占用或磁盘权限') from None
+
+    def invalidate_tpm(self, instance):
+        self.destroy(instance)
+        raise ApiError('VAULT_DESTROYED', 'TPM 验证失败或本机绑定不匹配，账号保险库的盐和数据库已销毁，无法使用密码恢复')
+
+    def require_active(self, instance):
+        if instance in self.revoked or self.marker(instance).exists():
+            # 其他进程看到标记也清除缓存；上次被占用的文件在这里再次尝试销毁。
+            self.destroy(instance)
+            raise ApiError('VAULT_DESTROYED', '账号保险库已销毁，请重新设置实例密码并备份账号')
+
+    def checked_record(self, instance):
+        row = self.record(instance)
+        if row is not None and row[5]:
+            from module.runtime.account_tpm import TpmProtector
+            key = None
+            failed = False
+            try:
+                key = SecretKey(TpmProtector(self.root, instance).unwrap(row[5]))
+                self.decrypt(instance, row, key)
+            except Exception:
+                failed = True
+            finally:
+                if key is not None:
+                    key.clear()
+            if failed:
+                self.invalidate_tpm(instance)
+        return row
+
     def record(self, instance):
+        self.require_active(instance)
         path = self.path(instance)
         if not path.exists():
             return None
@@ -77,9 +164,17 @@ class AccountVault:
             raise ApiError('VAULT_INVALID', '账号保险库损坏，已拒绝读取或写入游戏') from None
 
     def status(self, instance):
-        row = self.record(instance)
+        if instance in self.revoked or self.marker(instance).exists():
+            self.destroy(instance)
+            return {'initialized': False, 'enabled': False, 'unlocked': False, 'tpm_bound': False, 'destroyed': True}
+        try:
+            row = self.checked_record(instance)
+        except ApiError as error:
+            if error.code != 'VAULT_DESTROYED':
+                raise
+            return {'initialized': False, 'enabled': False, 'unlocked': False, 'tpm_bound': False, 'destroyed': True}
         return {'initialized': row is not None, 'enabled': bool(row and row[4]),
-                'unlocked': instance in self.keys, 'tpm_bound': bool(row and row[5])}
+                'unlocked': instance in self.keys, 'tpm_bound': bool(row and row[5]), 'destroyed': False}
 
     @staticmethod
     def derive(password, salt):
@@ -99,10 +194,10 @@ class AccountVault:
             raise ApiError('VAULT_AUTH_FAILED', '实例密码不正确或保险库已被篡改') from None
 
     def authenticate(self, instance, password):
+        row = self.checked_record(instance)
         until = self.failures.get(instance, 0)
         if time.monotonic() < until:
             raise ApiError('RATE_LIMITED', '密码验证失败，请稍后重试')
-        row = self.record(instance)
         if row is None:
             raise ApiError('VAULT_NOT_SET', '请先设置独立实例密码')
         key = self.derive(password, row[0])
@@ -114,7 +209,9 @@ class AccountVault:
         self.failures.pop(instance, None)
         return row, key, data
 
-    def save(self, instance, salt, key, data, enabled=False, machine=_KEEP_MACHINE):
+    def save(self, instance, salt, key, data, enabled=False, machine=_KEEP_MACHINE, reset_destroyed=False):
+        if not reset_destroyed:
+            self.require_active(instance)
         if machine is _KEEP_MACHINE:
             row = self.record(instance)
             machine = row[5] if row else None
@@ -132,14 +229,20 @@ class AccountVault:
             db.execute('INSERT OR REPLACE INTO vault VALUES (1, ?, ?, ?, ?, ?, ?)',
                        (salt, cipher.nonce, tag, payload, int(enabled), machine))
         path.chmod(0o600)
+        if reset_destroyed:
+            self.marker(instance).unlink(missing_ok=True)
+            self.revoked.discard(instance)
 
     def create(self, instance, password):
-        if self.record(instance) is not None:
+        destroyed = instance in self.revoked or self.marker(instance).exists()
+        if destroyed:
+            self.destroy(instance)
+        elif self.checked_record(instance) is not None:
             raise ApiError('VAULT_EXISTS', '实例密码已设置，请使用修改密码')
         self.check_password(password)
         salt = os.urandom(256)
         key = self.derive(password, salt)
-        self.save(instance, salt, key, {'profiles': [], 'selected': None})
+        self.save(instance, salt, key, {'profiles': [], 'selected': None}, machine=None, reset_destroyed=destroyed)
         self.keys[instance] = key
 
     @staticmethod
@@ -148,14 +251,22 @@ class AccountVault:
             raise ApiError('WEAK_PASSWORD', '请使用至少 16 位、包含至少 8 种不同字符的独立密码或长口令')
 
     def startup_key(self, instance):
-        row = self.record(instance)
+        row = self.checked_record(instance)
         if row is None or not row[4]:
             return None
         key = self.keys.get(instance)
         if key is None and row[5]:
             from module.runtime.account_tpm import TpmProtector
-            key = SecretKey(TpmProtector(self.root, instance).unwrap(row[5]))
-            self.decrypt(instance, row, key)
+            failed = False
+            try:
+                key = SecretKey(TpmProtector(self.root, instance).unwrap(row[5]))
+                self.decrypt(instance, row, key)
+            except Exception:
+                failed = True
+            if failed:
+                if key is not None:
+                    key.clear()
+                self.invalidate_tpm(instance)
             self.keys[instance] = key
         if key is None:
             raise ApiError('VAULT_LOCKED', '账号恢复已启用，请先用实例密码解锁；服务重启后需重新解锁')

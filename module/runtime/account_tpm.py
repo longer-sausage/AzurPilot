@@ -48,6 +48,21 @@ class TpmProtector:
         identity = str(root.resolve()) + '\0' + instance
         self.name = 'AzurPilot.Account.' + hashlib.sha256(identity.encode('utf-8')).hexdigest()
 
+    @staticmethod
+    def host_identity():
+        if os.name != 'nt':
+            raise ApiError('TPM_UNAVAILABLE', 'TPM 自动解锁目前只支持 Windows 主机')
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Microsoft\Cryptography',
+                                0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as key:
+                identity = winreg.QueryValueEx(key, 'MachineGuid')[0]
+            if not isinstance(identity, str) or not identity:
+                raise ValueError()
+            return hashlib.sha256(identity.encode('utf-8')).hexdigest()
+        except (OSError, ValueError):
+            raise ApiError('TPM_UNAVAILABLE', '无法验证 Windows 主机身份') from None
+
     def execute(self, action, data):
         if os.name != 'nt':
             raise ApiError('TPM_UNAVAILABLE', 'TPM 自动解锁目前只支持 Windows 主机')
@@ -63,10 +78,25 @@ class TpmProtector:
                 raise ValueError()
             return blob
         except (OSError, subprocess.SubprocessError, ValueError):
-            raise ApiError('TPM_UNAVAILABLE', 'TPM 不可用或本机绑定失效，请用实例密码解锁；不会回退到软件密钥') from None
+            raise ApiError('TPM_UNAVAILABLE', 'TPM 不可用或本机绑定失效') from None
 
     def wrap(self, key):
-        return self.execute('wrap', key)
+        identity = self.host_identity()
+        blob = self.execute('wrap', key)
+        return json.dumps({'version': 1, 'host': identity, 'key': base64.b64encode(blob).decode('ascii')}).encode('utf-8')
 
     def unwrap(self, blob):
+        if len(blob) != 256:
+            try:
+                binding = json.loads(blob)
+                if binding['version'] != 1 or not isinstance(binding['host'], str):
+                    raise ValueError()
+                if binding['host'] != self.host_identity():
+                    raise ApiError('TPM_DEVICE_CHANGED', '检测到 Windows 主机已更换')
+                blob = base64.b64decode(binding['key'], validate=True)
+                if len(blob) != 256:
+                    raise ValueError()
+            except (ValueError, TypeError, KeyError, UnicodeError):
+                raise ApiError('TPM_UNAVAILABLE', 'TPM 绑定数据无效') from None
+        # 旧版 256 字节绑定通过实际 TPM 解封校验，失败同样销毁保险库。
         return self.execute('unwrap', blob)
